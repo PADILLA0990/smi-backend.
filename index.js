@@ -81,6 +81,38 @@ app.get('/api/historial', async (req, res) => {
   }
 });
 
+// --- RUTAS PARA GESTIÓN DE INVENTARIO (REUBICAR Y ELIMINAR) ---
+
+// Actualizar ubicación de un producto (Reubicar)
+app.put('/api/productos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ubicacion_general, codigo_estanteria } = req.body;
+    const productoActualizado = await prisma.producto.update({
+      where: { id: Number(id) },
+      data: { ubicacion_general, codigo_estanteria }
+    });
+    res.json(productoActualizado);
+  } catch (error) {
+    console.error("Error al actualizar producto:", error);
+    res.status(500).json({ error: "Error al actualizar" });
+  }
+});
+
+// Eliminar un producto físicamente del inventario
+app.delete('/api/productos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.producto.delete({
+      where: { id: Number(id) }
+    });
+    res.json({ message: "Producto eliminado correctamente" });
+  } catch (error) {
+    console.error("Error al eliminar producto:", error);
+    res.status(500).json({ error: "Error al eliminar" });
+  }
+});
+
 // Inicializar el servidor
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
