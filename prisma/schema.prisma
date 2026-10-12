@@ -9,13 +9,22 @@ datasource db {
 }
 
 model Producto {
-  id                 String   @id @default(uuid())
-  codigo_producto    String   @unique
-  descripcion        String
-  categoria          String
-  cantidad           Int
-  estado             String
-  fecha_ingreso      DateTime @default(now())
-  ubicacion_general  String   
-  codigo_estanteria  String?  
+  id                Int      @id @default(autoincrement())
+  codigo_producto   String   @unique
+  descripcion       String
+  categoria         String
+  cantidad          Int
+  estado            String
+  ubicacion_general String
+  codigo_estanteria String?
+  fecha_ingreso     DateTime @default(now())
+}
+
+model Historial {
+  id              Int      @id @default(autoincrement())
+  codigo_producto String
+  accion          String   
+  operario        String   
+  detalles        String?  
+  fecha           DateTime @default(now())
 }

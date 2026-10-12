@@ -52,6 +52,35 @@ app.put('/api/productos/:id', async (req, res) => {
   }
 });
 
+// --- RUTAS PARA LA AUDITORÍA (HISTORIAL) ---
+
+// 1. Guardar un nuevo movimiento en el historial
+app.post('/api/historial', async (req, res) => {
+  try {
+    const { codigo_producto, accion, operario, detalles } = req.body;
+    const nuevoRegistro = await prisma.historial.create({
+      data: { codigo_producto, accion, operario, detalles }
+    });
+    res.status(201).json(nuevoRegistro);
+  } catch (error) {
+    console.error("Error al guardar historial:", error);
+    res.status(500).json({ error: "Error al registrar el movimiento" });
+  }
+});
+
+// 2. Obtener todo el historial (del más reciente al más antiguo)
+app.get('/api/historial', async (req, res) => {
+  try {
+    const registros = await prisma.historial.findMany({
+      orderBy: { fecha: 'desc' } // Ordena por fecha descendente
+    });
+    res.json(registros);
+  } catch (error) {
+    console.error("Error al obtener historial:", error);
+    res.status(500).json({ error: "Error al obtener los registros" });
+  }
+});
+
 // Inicializar el servidor
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
