@@ -113,6 +113,54 @@ app.delete('/api/productos/:id', async (req, res) => {
   }
 });
 
+// --- RUTA INTELIGENTE PARA SALIDAS DE INVENTARIO ---
+app.post('/api/salida', async (req, res) => {
+  try {
+    const { codigo_producto, cantidad_retirada, motivo, operario } = req.body;
+    
+    // 1. Buscar si el producto existe
+    const producto = await prisma.producto.findUnique({
+      where: { codigo_producto }
+    });
+
+    if (!producto) {
+      return res.status(404).json({ error: "El producto no existe en el inventario." });
+    }
+
+    // 2. Verificar si hay suficiente cantidad
+    if (producto.cantidad < cantidad_retirada) {
+      return res.status(400).json({ error: `Stock insuficiente. Solo hay ${producto.cantidad} unidades disponibles.` });
+    }
+
+    const nuevaCantidad = producto.cantidad - cantidad_retirada;
+
+    // 3. Actualizar la cantidad o eliminar si se acaba
+    if (nuevaCantidad === 0) {
+      await prisma.producto.delete({ where: { id: producto.id } });
+    } else {
+      await prisma.producto.update({
+        where: { id: producto.id },
+        data: { cantidad: nuevaCantidad }
+      });
+    }
+
+    // 4. Registrar la auditoría en el Historial
+    await prisma.historial.create({
+      data: {
+        codigo_producto,
+        accion: 'SALIDA/RETIRO',
+        operario,
+        detalles: `Retiro de ${cantidad_retirada} unidades. Motivo: ${motivo}`
+      }
+    });
+
+    res.json({ message: "Salida exitosa", nuevaCantidad });
+  } catch (error) {
+    console.error("Error en salida:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+});
+
 // Inicializar el servidor
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
