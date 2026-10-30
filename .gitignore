@@ -1,2 +1,7 @@
 .env
 node_modules
+# Generado por "prisma skills sync" (postinstall)
+.agents
+.claude/skills
+.cursor
+.devin
