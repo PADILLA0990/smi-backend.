@@ -28,3 +28,58 @@ model Historial {
   detalles        String?  
   fecha           DateTime @default(now())
 }
+
+// --- MÓDULO DE SOLICITUDES SBO ---
+
+enum EstadoSolicitud {
+  CREADA
+  APROBADA
+  EN_ALISTAMIENTO
+  ALISTADA
+  DESPACHADA
+  CANCELADA
+}
+
+model Solicitud {
+  id                       Int               @id @default(autoincrement())
+  codigo_sbo               String            @unique
+  beneficiario             String
+  estado                   EstadoSolicitud   @default(CREADA)
+  creado_por               String
+  alistador                String?
+  observaciones            String?
+  fecha_solicitud          DateTime          @default(now())
+  fecha_requerida          DateTime?
+  fecha_aprobacion         DateTime?
+  fecha_inicio_alistamiento DateTime?
+  fecha_fin_alistamiento   DateTime?
+  fecha_despacho           DateTime?
+  fecha_cancelacion        DateTime?
+  items                    SolicitudItem[]
+  eventos                  SolicitudEvento[]
+}
+
+model SolicitudItem {
+  id                  Int       @id @default(autoincrement())
+  solicitudId         Int
+  solicitud           Solicitud @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  codigo_producto     String    // Texto (no FK): Producto se elimina cuando su stock llega a 0
+  descripcion         String    // Copia de la descripción al momento de crear la solicitud
+  cantidad_solicitada Int
+  cantidad_alistada   Int       @default(0)
+
+  @@index([solicitudId])
+}
+
+model SolicitudEvento {
+  id              Int              @id @default(autoincrement())
+  solicitudId     Int
+  solicitud       Solicitud        @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  estado_anterior EstadoSolicitud?
+  estado_nuevo    EstadoSolicitud
+  usuario         String
+  nota            String?
+  fecha           DateTime         @default(now())
+
+  @@index([solicitudId])
+}

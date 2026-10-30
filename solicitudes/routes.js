@@ -1,0 +1,275 @@
+const express = require('express');
+const { EstadoSolicitud } = require('@prisma/client');
+const prisma = require('../lib/prisma');
+const { descontarStock, StockError } = require('../lib/stock');
+const { validarTransicion, accionesDisponibles } = require('./estados');
+
+const router = express.Router();
+
+// Las transacciones van contra Supabase remoto: damos margen extra al tiempo límite
+const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
+
+const esEnteroPositivo = (n) => Number.isInteger(n) && n > 0;
+
+// Agrega las acciones válidas para que el frontend sepa qué botones mostrar
+const conAcciones = (solicitud) => ({ ...solicitud, acciones: accionesDisponibles(solicitud.estado) });
+
+// Valida los ítems recibidos y completa la descripción desde el inventario
+async function prepararItems(tx, items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new StockError(400, 'La solicitud debe tener al menos un ítem.');
+  }
+
+  const preparados = [];
+  for (const item of items) {
+    const cantidad = Number(item.cantidad_solicitada);
+    if (!item.codigo_producto || !esEnteroPositivo(cantidad)) {
+      throw new StockError(400, 'Cada ítem necesita código de producto y una cantidad entera mayor a 0.');
+    }
+    const producto = await tx.producto.findUnique({ where: { codigo_producto: item.codigo_producto } });
+    if (!producto) {
+      throw new StockError(404, `El producto ${item.codigo_producto} no existe en el inventario.`);
+    }
+    preparados.push({
+      codigo_producto: producto.codigo_producto,
+      descripcion: producto.descripcion,
+      cantidad_solicitada: cantidad
+    });
+  }
+  return preparados;
+}
+
+// Suma cantidades por producto (una SBO puede repetir el mismo código en varias líneas)
+function totalesPorProducto(items, campo) {
+  const totales = {};
+  for (const item of items) {
+    totales[item.codigo_producto] = (totales[item.codigo_producto] || 0) + item[campo];
+  }
+  return totales;
+}
+
+function manejarError(res, error, mensaje) {
+  if (error instanceof StockError) {
+    return res.status(error.status).json({ error: error.message });
+  }
+  if (error.code === 'P2002') {
+    return res.status(409).json({ error: 'Ya existe una solicitud con ese código SBO.' });
+  }
+  console.error(mensaje, error);
+  res.status(500).json({ error: mensaje });
+}
+
+// Rechaza ids no numéricos antes de llegar a Prisma
+router.param('id', (req, res, next, id) => {
+  if (!Number.isInteger(Number(id))) {
+    return res.status(404).json({ error: 'Solicitud no encontrada.' });
+  }
+  next();
+});
+
+// 1. Listar solicitudes (filtro opcional por estado)
+router.get('/', async (req, res) => {
+  try {
+    const { estado } = req.query;
+    if (estado && !Object.values(EstadoSolicitud).includes(estado)) {
+      return res.status(400).json({ error: `Estado inválido: ${estado}` });
+    }
+    const solicitudes = await prisma.solicitud.findMany({
+      where: estado ? { estado } : undefined,
+      include: { items: true },
+      orderBy: { fecha_solicitud: 'desc' }
+    });
+    res.json(solicitudes.map(conAcciones));
+  } catch (error) {
+    manejarError(res, error, 'Error al obtener las solicitudes');
+  }
+});
+
+// 2. Detalle de una solicitud con ítems y trazabilidad de estados
+router.get('/:id', async (req, res) => {
+  try {
+    const solicitud = await prisma.solicitud.findUnique({
+      where: { id: Number(req.params.id) },
+      include: { items: true, eventos: { orderBy: { fecha: 'asc' } } }
+    });
+    if (!solicitud) {
+      return res.status(404).json({ error: 'Solicitud no encontrada.' });
+    }
+    res.json(conAcciones(solicitud));
+  } catch (error) {
+    manejarError(res, error, 'Error al obtener la solicitud');
+  }
+});
+
+// 3. Crear una solicitud SBO con sus ítems
+router.post('/', async (req, res) => {
+  try {
+    const { codigo_sbo, beneficiario, creado_por, fecha_requerida, observaciones, items } = req.body;
+    if (!codigo_sbo || !beneficiario || !creado_por) {
+      return res.status(400).json({ error: 'Código SBO, beneficiario y usuario son obligatorios.' });
+    }
+
+    const solicitud = await prisma.$transaction(async (tx) => {
+      const itemsPreparados = await prepararItems(tx, items);
+      const nueva = await tx.solicitud.create({
+        data: {
+          codigo_sbo,
+          beneficiario,
+          creado_por,
+          observaciones,
+          fecha_requerida: fecha_requerida ? new Date(fecha_requerida) : null,
+          items: { create: itemsPreparados },
+          eventos: { create: { estado_nuevo: 'CREADA', usuario: creado_por } }
+        },
+        include: { items: true }
+      });
+      await tx.historial.create({
+        data: {
+          codigo_producto: codigo_sbo,
+          accion: 'SBO CREADA',
+          operario: creado_por,
+          detalles: `Solicitud para ${beneficiario} con ${itemsPreparados.length} ítem(s)`
+        }
+      });
+      return nueva;
+    }, OPCIONES_TX);
+
+    res.status(201).json(conAcciones(solicitud));
+  } catch (error) {
+    manejarError(res, error, 'Error al crear la solicitud');
+  }
+});
+
+// 4. Reemplazar los ítems (solo mientras la solicitud está en CREADA)
+router.put('/:id/items', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const solicitud = await prisma.$transaction(async (tx) => {
+      const actual = await tx.solicitud.findUnique({ where: { id } });
+      if (!actual) {
+        throw new StockError(404, 'Solicitud no encontrada.');
+      }
+      if (actual.estado !== 'CREADA') {
+        throw new StockError(400, `Los ítems solo se pueden editar en estado CREADA (actual: ${actual.estado}).`);
+      }
+      const itemsPreparados = await prepararItems(tx, req.body.items);
+      await tx.solicitudItem.deleteMany({ where: { solicitudId: id } });
+      return tx.solicitud.update({
+        where: { id },
+        data: { items: { create: itemsPreparados } },
+        include: { items: true }
+      });
+    }, OPCIONES_TX);
+
+    res.json(conAcciones(solicitud));
+  } catch (error) {
+    manejarError(res, error, 'Error al actualizar los ítems');
+  }
+});
+
+// 5. Ejecutar una transición de la máquina de estados
+//    Body: { accion, usuario, alistador?, cantidades?: { [itemId]: n }, nota? }
+router.post('/:id/transicion', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { accion, usuario, alistador, cantidades = {}, nota } = req.body;
+    if (!usuario) {
+      return res.status(400).json({ error: 'El usuario es obligatorio.' });
+    }
+
+    const solicitud = await prisma.$transaction(async (tx) => {
+      const actual = await tx.solicitud.findUnique({ where: { id }, include: { items: true } });
+      if (!actual) {
+        throw new StockError(404, 'Solicitud no encontrada.');
+      }
+
+      const { transicion, error } = validarTransicion(actual.estado, accion);
+      if (error) {
+        throw new StockError(400, error);
+      }
+
+      const datos = { estado: transicion.hacia, [transicion.fecha]: new Date() };
+
+      if (accion === 'aprobar') {
+        // Se valida disponibilidad, pero el stock se descuenta al despachar
+        const totales = totalesPorProducto(actual.items, 'cantidad_solicitada');
+        for (const [codigo, requerido] of Object.entries(totales)) {
+          const producto = await tx.producto.findUnique({ where: { codigo_producto: codigo } });
+          const disponible = producto ? producto.cantidad : 0;
+          if (disponible < requerido) {
+            throw new StockError(400, `Stock insuficiente para ${codigo}: se requieren ${requerido} y hay ${disponible}.`);
+          }
+        }
+      }
+
+      if (accion === 'iniciar') {
+        if (!alistador) {
+          throw new StockError(400, 'Debe asignar un alistador para iniciar el alistamiento.');
+        }
+        datos.alistador = alistador;
+      }
+
+      if (accion === 'finalizar') {
+        // Si no se envía cantidad para un ítem, se asume que se alistó completo
+        let totalAlistado = 0;
+        for (const item of actual.items) {
+          const enviada = cantidades[item.id];
+          const alistada = enviada === undefined ? item.cantidad_solicitada : Number(enviada);
+          if (!Number.isInteger(alistada) || alistada < 0 || alistada > item.cantidad_solicitada) {
+            throw new StockError(400, `Cantidad alistada inválida para ${item.codigo_producto} (0 a ${item.cantidad_solicitada}).`);
+          }
+          totalAlistado += alistada;
+          await tx.solicitudItem.update({ where: { id: item.id }, data: { cantidad_alistada: alistada } });
+        }
+        if (totalAlistado === 0) {
+          throw new StockError(400, 'No se alistó ningún producto. Si no hay nada que despachar, cancele la solicitud.');
+        }
+      }
+
+      if (accion === 'despachar') {
+        const totales = totalesPorProducto(actual.items, 'cantidad_alistada');
+        for (const [codigo, cantidad] of Object.entries(totales)) {
+          if (cantidad === 0) continue;
+          await descontarStock(tx, codigo, cantidad);
+          await tx.historial.create({
+            data: {
+              codigo_producto: codigo,
+              accion: 'SALIDA SBO',
+              operario: usuario,
+              detalles: `Despacho de ${cantidad} unidades. SBO ${actual.codigo_sbo} → ${actual.beneficiario}`
+            }
+          });
+        }
+      }
+
+      // Actualización condicionada al estado leído: evita que dos usuarios ejecuten la misma transición
+      const { count } = await tx.solicitud.updateMany({ where: { id, estado: actual.estado }, data: datos });
+      if (count === 0) {
+        throw new StockError(409, 'La solicitud fue modificada por otro usuario. Recargue e intente de nuevo.');
+      }
+
+      await tx.solicitudEvento.create({
+        data: { solicitudId: id, estado_anterior: actual.estado, estado_nuevo: transicion.hacia, usuario, nota }
+      });
+      await tx.historial.create({
+        data: {
+          codigo_producto: actual.codigo_sbo,
+          accion: `SBO ${transicion.hacia}`,
+          operario: usuario,
+          detalles: nota || `${actual.estado} → ${transicion.hacia}${datos.alistador ? ` (alistador: ${datos.alistador})` : ''}`
+        }
+      });
+
+      return tx.solicitud.findUnique({
+        where: { id },
+        include: { items: true, eventos: { orderBy: { fecha: 'asc' } } }
+      });
+    }, OPCIONES_TX);
+
+    res.json(conAcciones(solicitud));
+  } catch (error) {
+    manejarError(res, error, 'Error al cambiar el estado de la solicitud');
+  }
+});
+
+module.exports = router;

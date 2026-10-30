@@ -1,9 +1,10 @@
 const express = require('express');
 const cors = require('cors');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('./lib/prisma');
+const { descontarStock, StockError } = require('./lib/stock');
+const solicitudesRoutes = require('./solicitudes/routes');
 
 const app = express();
-const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
 
 // Configuración de middlewares
@@ -33,22 +34,11 @@ app.post('/api/productos', async (req, res) => {
     });
     res.status(201).json(nuevoProducto);
   } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: `Ya existe un producto con el código ${req.body.codigo_producto}.` });
+    }
     console.error(error);
     res.status(500).json({ error: 'Error al crear el producto' });
-  }
-});
-
-// Ruta para actualizar la ubicación o datos de un producto
-app.put('/api/productos/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const productoActualizado = await prisma.producto.update({
-      where: { id: id },
-      data: req.body
-    });
-    res.json(productoActualizado);
-  } catch (error) {
-    res.status(500).json({ error: 'Error al actualizar el producto' });
   }
 });
 
@@ -117,49 +107,37 @@ app.delete('/api/productos/:id', async (req, res) => {
 app.post('/api/salida', async (req, res) => {
   try {
     const { codigo_producto, cantidad_retirada, motivo, operario } = req.body;
-    
-    // 1. Buscar si el producto existe
-    const producto = await prisma.producto.findUnique({
-      where: { codigo_producto }
-    });
 
-    if (!producto) {
-      return res.status(404).json({ error: "El producto no existe en el inventario." });
+    if (!Number.isInteger(cantidad_retirada) || cantidad_retirada <= 0) {
+      return res.status(400).json({ error: "La cantidad a retirar debe ser un número entero mayor a 0." });
     }
 
-    // 2. Verificar si hay suficiente cantidad
-    if (producto.cantidad < cantidad_retirada) {
-      return res.status(400).json({ error: `Stock insuficiente. Solo hay ${producto.cantidad} unidades disponibles.` });
-    }
-
-    const nuevaCantidad = producto.cantidad - cantidad_retirada;
-
-    // 3. Actualizar la cantidad o eliminar si se acaba
-    if (nuevaCantidad === 0) {
-      await prisma.producto.delete({ where: { id: producto.id } });
-    } else {
-      await prisma.producto.update({
-        where: { id: producto.id },
-        data: { cantidad: nuevaCantidad }
+    // Descuento de stock y auditoría en una sola transacción: o se hacen ambos o ninguno
+    const nuevaCantidad = await prisma.$transaction(async (tx) => {
+      const restante = await descontarStock(tx, codigo_producto, cantidad_retirada);
+      await tx.historial.create({
+        data: {
+          codigo_producto,
+          accion: 'SALIDA/RETIRO',
+          operario,
+          detalles: `Retiro de ${cantidad_retirada} unidades. Motivo: ${motivo}`
+        }
       });
-    }
-
-    // 4. Registrar la auditoría en el Historial
-    await prisma.historial.create({
-      data: {
-        codigo_producto,
-        accion: 'SALIDA/RETIRO',
-        operario,
-        detalles: `Retiro de ${cantidad_retirada} unidades. Motivo: ${motivo}`
-      }
-    });
+      return restante;
+    }, { maxWait: 10000, timeout: 20000 });
 
     res.json({ message: "Salida exitosa", nuevaCantidad });
   } catch (error) {
+    if (error instanceof StockError) {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error("Error en salida:", error);
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
+
+// --- MÓDULO DE SOLICITUDES SBO ---
+app.use('/api/solicitudes', solicitudesRoutes);
 
 // Inicializar el servidor
 app.listen(PORT, () => {
