@@ -14,6 +14,7 @@ model Producto {
   descripcion       String
   categoria         String
   cantidad          Int
+  cantidad_reservada Int     @default(0) // Apartada por Solicitudes SBO aprobadas, aún no despachadas
   estado            String
   ubicacion_general String
   codigo_estanteria String?

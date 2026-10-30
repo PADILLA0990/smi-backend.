@@ -1,7 +1,8 @@
 const express = require('express');
 const { EstadoSolicitud } = require('@prisma/client');
 const prisma = require('../lib/prisma');
-const { descontarStock, StockError } = require('../lib/stock');
+const { StockError, reservarStock, liberarReserva, despacharReservado } = require('../lib/stock');
+const { manejarError: manejarErrorGeneral, esEnteroPositivo } = require('../lib/errores');
 const { validarTransicion, accionesDisponibles } = require('./estados');
 
 const router = express.Router();
@@ -9,7 +10,8 @@ const router = express.Router();
 // Las transacciones van contra Supabase remoto: damos margen extra al tiempo límite
 const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
 
-const esEnteroPositivo = (n) => Number.isInteger(n) && n > 0;
+// Estados en los que la solicitud tiene stock reservado
+const ESTADOS_CON_RESERVA = ['APROBADA', 'EN_ALISTAMIENTO', 'ALISTADA'];
 
 // Agrega las acciones válidas para que el frontend sepa qué botones mostrar
 const conAcciones = (solicitud) => ({ ...solicitud, acciones: accionesDisponibles(solicitud.estado) });
@@ -23,12 +25,13 @@ async function prepararItems(tx, items) {
   const preparados = [];
   for (const item of items) {
     const cantidad = Number(item.cantidad_solicitada);
-    if (!item.codigo_producto || !esEnteroPositivo(cantidad)) {
+    const codigo = typeof item.codigo_producto === 'string' ? item.codigo_producto.trim() : '';
+    if (!codigo || !esEnteroPositivo(cantidad)) {
       throw new StockError(400, 'Cada ítem necesita código de producto y una cantidad entera mayor a 0.');
     }
-    const producto = await tx.producto.findUnique({ where: { codigo_producto: item.codigo_producto } });
+    const producto = await tx.producto.findUnique({ where: { codigo_producto: codigo } });
     if (!producto) {
-      throw new StockError(404, `El producto ${item.codigo_producto} no existe en el inventario.`);
+      throw new StockError(404, `El producto ${codigo} no existe en el inventario.`);
     }
     preparados.push({
       codigo_producto: producto.codigo_producto,
@@ -49,14 +52,10 @@ function totalesPorProducto(items, campo) {
 }
 
 function manejarError(res, error, mensaje) {
-  if (error instanceof StockError) {
-    return res.status(error.status).json({ error: error.message });
-  }
   if (error.code === 'P2002') {
     return res.status(409).json({ error: 'Ya existe una solicitud con ese código SBO.' });
   }
-  console.error(mensaje, error);
-  res.status(500).json({ error: mensaje });
+  manejarErrorGeneral(res, error, mensaje);
 }
 
 // Rechaza ids no numéricos antes de llegar a Prisma
@@ -190,15 +189,18 @@ router.post('/:id/transicion', async (req, res) => {
 
       const datos = { estado: transicion.hacia, [transicion.fecha]: new Date() };
 
+      const solicitadas = totalesPorProducto(actual.items, 'cantidad_solicitada');
+
       if (accion === 'aprobar') {
-        // Se valida disponibilidad, pero el stock se descuenta al despachar
-        const totales = totalesPorProducto(actual.items, 'cantidad_solicitada');
-        for (const [codigo, requerido] of Object.entries(totales)) {
-          const producto = await tx.producto.findUnique({ where: { codigo_producto: codigo } });
-          const disponible = producto ? producto.cantidad : 0;
-          if (disponible < requerido) {
-            throw new StockError(400, `Stock insuficiente para ${codigo}: se requieren ${requerido} y hay ${disponible}.`);
-          }
+        // Se aparta el stock: los retiros manuales ya no pueden usarlo
+        for (const [codigo, requerido] of Object.entries(solicitadas)) {
+          await reservarStock(tx, codigo, requerido);
+        }
+      }
+
+      if (accion === 'cancelar' && ESTADOS_CON_RESERVA.includes(actual.estado)) {
+        for (const [codigo, reservado] of Object.entries(solicitadas)) {
+          await liberarReserva(tx, codigo, reservado);
         }
       }
 
@@ -227,10 +229,11 @@ router.post('/:id/transicion', async (req, res) => {
       }
 
       if (accion === 'despachar') {
-        const totales = totalesPorProducto(actual.items, 'cantidad_alistada');
-        for (const [codigo, cantidad] of Object.entries(totales)) {
+        // Se descuenta lo alistado y se libera toda la reserva (incluido lo que no se alcanzó a alistar)
+        const alistadas = totalesPorProducto(actual.items, 'cantidad_alistada');
+        for (const [codigo, cantidad] of Object.entries(alistadas)) {
+          await despacharReservado(tx, codigo, cantidad, solicitadas[codigo]);
           if (cantidad === 0) continue;
-          await descontarStock(tx, codigo, cantidad);
           await tx.historial.create({
             data: {
               codigo_producto: codigo,
