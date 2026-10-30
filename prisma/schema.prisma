@@ -3,31 +3,35 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
 model Producto {
-  id                Int      @id @default(autoincrement())
-  codigo_producto   String   @unique
-  descripcion       String
-  categoria         String
-  cantidad          Int
-  cantidad_reservada Int     @default(0) // Apartada por Solicitudes SBO aprobadas, aún no despachadas
-  estado            String
-  ubicacion_general String
-  codigo_estanteria String?
-  fecha_ingreso     DateTime @default(now())
+  id                 Int      @id @default(autoincrement())
+  codigo_producto    String   @unique
+  descripcion        String
+  categoria          String
+  cantidad           Int
+  cantidad_reservada Int      @default(0) // Apartada por Solicitudes SBO aprobadas, aún no despachadas
+  estado             String
+  ubicacion_general  String
+  codigo_estanteria  String?
+  fecha_ingreso      DateTime @default(now())
 }
 
 model Historial {
   id              Int      @id @default(autoincrement())
   codigo_producto String
-  accion          String   
-  operario        String   
-  detalles        String?  
+  accion          String
+  operario        String // Nombre de usuario de quien hizo el movimiento (texto: conserva los registros previos a la Fase B)
+  detalles        String?
   fecha           DateTime @default(now())
+  usuarioId       Int? // Usuario autenticado (vacío en registros anteriores a la Fase B)
+  usuario         Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([usuarioId])
 }
 
 // --- MÓDULO DE SOLICITUDES SBO ---
@@ -42,30 +46,30 @@ enum EstadoSolicitud {
 }
 
 model Solicitud {
-  id                       Int               @id @default(autoincrement())
-  codigo_sbo               String            @unique
-  beneficiario             String
-  estado                   EstadoSolicitud   @default(CREADA)
-  creado_por               String
-  alistador                String?
-  observaciones            String?
-  fecha_solicitud          DateTime          @default(now())
-  fecha_requerida          DateTime?
-  fecha_aprobacion         DateTime?
+  id                        Int               @id @default(autoincrement())
+  codigo_sbo                String            @unique
+  beneficiario              String
+  estado                    EstadoSolicitud   @default(CREADA)
+  creado_por                String
+  alistador                 String?
+  observaciones             String?
+  fecha_solicitud           DateTime          @default(now())
+  fecha_requerida           DateTime?
+  fecha_aprobacion          DateTime?
   fecha_inicio_alistamiento DateTime?
-  fecha_fin_alistamiento   DateTime?
-  fecha_despacho           DateTime?
-  fecha_cancelacion        DateTime?
-  items                    SolicitudItem[]
-  eventos                  SolicitudEvento[]
+  fecha_fin_alistamiento    DateTime?
+  fecha_despacho            DateTime?
+  fecha_cancelacion         DateTime?
+  items                     SolicitudItem[]
+  eventos                   SolicitudEvento[]
 }
 
 model SolicitudItem {
   id                  Int       @id @default(autoincrement())
   solicitudId         Int
   solicitud           Solicitud @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
-  codigo_producto     String    // Texto (no FK): Producto se elimina cuando su stock llega a 0
-  descripcion         String    // Copia de la descripción al momento de crear la solicitud
+  codigo_producto     String // Texto (no FK): Producto se elimina cuando su stock llega a 0
+  descripcion         String // Copia de la descripción al momento de crear la solicitud
   cantidad_solicitada Int
   cantidad_alistada   Int       @default(0)
 
@@ -83,4 +87,44 @@ model SolicitudEvento {
   fecha           DateTime         @default(now())
 
   @@index([solicitudId])
+}
+
+// --- USUARIOS, ROLES Y SESIONES (Fase B) ---
+
+enum Rol {
+  ADMINISTRADOR
+  COORDINADOR
+  OPERARIO
+  CONSULTA
+}
+
+model Usuario {
+  id                    Int             @id @default(autoincrement())
+  nombre                String
+  usuario               String          @unique
+  password_hash         String
+  rol                   Rol             @default(OPERARIO)
+  activo                Boolean         @default(true)
+  debe_cambiar_password Boolean         @default(true)
+  intentos_fallidos     Int             @default(0)
+  bloqueado_hasta       DateTime?
+  ultimo_acceso         DateTime?
+  creado_en             DateTime        @default(now())
+  actualizado_en        DateTime        @updatedAt
+  sesiones              SesionRefresh[]
+  historial             Historial[]
+}
+
+model SesionRefresh {
+  id          Int       @id @default(autoincrement())
+  usuarioId   Int
+  usuario     Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  token_hash  String    @unique // SHA-256 del token: el token en claro solo vive en la cookie
+  expira      DateTime
+  revocada_en DateTime?
+  ip          String?
+  user_agent  String?
+  creado_en   DateTime  @default(now())
+
+  @@index([usuarioId])
 }

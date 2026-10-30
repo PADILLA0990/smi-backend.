@@ -6,7 +6,8 @@
 //
 // Uso:
 //   node scripts/verificar-consistencia.js                 (lee la BD de DATABASE_URL con Prisma)
-//   node scripts/verificar-consistencia.js --api <URL>     (lee por la API pública, solo GET)
+//   SMI_TOKEN=<token> node scripts/verificar-consistencia.js --api <URL>   (lee por la API, solo GET;
+//                                          desde la Fase B la API exige un token de acceso)
 //   node scripts/verificar-consistencia.js --json          (salida en JSON)
 // Sale con código 1 si encuentra diferencias.
 
@@ -126,7 +127,7 @@ function compararConsistencia({ productos, historial, solicitudes = [] }) {
 async function leerPorApi(base) {
   const url = base.replace(/\/+$/, '') + (base.endsWith('/api') ? '' : '/api');
   const get = async (ruta) => {
-    const r = await fetch(url + ruta);
+    const r = await fetch(url + ruta, { headers: process.env.SMI_TOKEN ? { Authorization: `Bearer ${process.env.SMI_TOKEN}` } : {} });
     if (!r.ok) throw new Error(`GET ${ruta} respondió ${r.status}`);
     return r.json();
   };

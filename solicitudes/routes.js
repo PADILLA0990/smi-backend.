@@ -4,6 +4,9 @@ const prisma = require('../lib/prisma');
 const { StockError, reservarStock, liberarReserva, despacharReservado } = require('../lib/stock');
 const { manejarError: manejarErrorGeneral, esEnteroPositivo } = require('../lib/errores');
 const { validarTransicion, accionesDisponibles } = require('./estados');
+const { registrarHistorial } = require('../lib/historial');
+const { autorizar } = require('../auth/middleware');
+const { tienePermiso, PERMISO_TRANSICION, ROLES_ALISTADORES } = require('../auth/permisos');
 
 const router = express.Router();
 
@@ -13,8 +16,11 @@ const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
 // Estados en los que la solicitud tiene stock reservado
 const ESTADOS_CON_RESERVA = ['APROBADA', 'EN_ALISTAMIENTO', 'ALISTADA'];
 
-// Agrega las acciones válidas para que el frontend sepa qué botones mostrar
-const conAcciones = (solicitud) => ({ ...solicitud, acciones: accionesDisponibles(solicitud.estado) });
+// Agrega las acciones válidas para el estado Y permitidas al rol, para que el frontend sepa qué botones mostrar
+const conAcciones = (solicitud, usuario) => ({
+  ...solicitud,
+  acciones: accionesDisponibles(solicitud.estado).filter(a => tienePermiso(usuario.rol, PERMISO_TRANSICION[a]))
+});
 
 // Valida los ítems recibidos y completa la descripción desde el inventario
 async function prepararItems(tx, items) {
@@ -67,7 +73,7 @@ router.param('id', (req, res, next, id) => {
 });
 
 // 1. Listar solicitudes (filtro opcional por estado)
-router.get('/', async (req, res) => {
+router.get('/', autorizar('inventario:ver'), async (req, res) => {
   try {
     const { estado } = req.query;
     if (estado && !Object.values(EstadoSolicitud).includes(estado)) {
@@ -78,14 +84,14 @@ router.get('/', async (req, res) => {
       include: { items: true },
       orderBy: { fecha_solicitud: 'desc' }
     });
-    res.json(solicitudes.map(conAcciones));
+    res.json(solicitudes.map(s => conAcciones(s, req.usuario)));
   } catch (error) {
     manejarError(res, error, 'Error al obtener las solicitudes');
   }
 });
 
 // 2. Detalle de una solicitud con ítems y trazabilidad de estados
-router.get('/:id', async (req, res) => {
+router.get('/:id', autorizar('inventario:ver'), async (req, res) => {
   try {
     const solicitud = await prisma.solicitud.findUnique({
       where: { id: Number(req.params.id) },
@@ -94,18 +100,19 @@ router.get('/:id', async (req, res) => {
     if (!solicitud) {
       return res.status(404).json({ error: 'Solicitud no encontrada.' });
     }
-    res.json(conAcciones(solicitud));
+    res.json(conAcciones(solicitud, req.usuario));
   } catch (error) {
     manejarError(res, error, 'Error al obtener la solicitud');
   }
 });
 
 // 3. Crear una solicitud SBO con sus ítems
-router.post('/', async (req, res) => {
+router.post('/', autorizar('sbo:crear'), async (req, res) => {
   try {
-    const { codigo_sbo, beneficiario, creado_por, fecha_requerida, observaciones, items } = req.body;
-    if (!codigo_sbo || !beneficiario || !creado_por) {
-      return res.status(400).json({ error: 'Código SBO, beneficiario y usuario son obligatorios.' });
+    const { codigo_sbo, beneficiario, fecha_requerida, observaciones, items } = req.body;
+    const creado_por = req.usuario.usuario;
+    if (!codigo_sbo || !beneficiario) {
+      return res.status(400).json({ error: 'Código SBO y beneficiario son obligatorios.' });
     }
 
     const solicitud = await prisma.$transaction(async (tx) => {
@@ -122,25 +129,19 @@ router.post('/', async (req, res) => {
         },
         include: { items: true }
       });
-      await tx.historial.create({
-        data: {
-          codigo_producto: codigo_sbo,
-          accion: 'SBO CREADA',
-          operario: creado_por,
-          detalles: `Solicitud para ${beneficiario} con ${itemsPreparados.length} ítem(s)`
-        }
-      });
+      await registrarHistorial(tx, codigo_sbo, 'SBO CREADA', req.usuario,
+        `Solicitud para ${beneficiario} con ${itemsPreparados.length} ítem(s)`);
       return nueva;
     }, OPCIONES_TX);
 
-    res.status(201).json(conAcciones(solicitud));
+    res.status(201).json(conAcciones(solicitud, req.usuario));
   } catch (error) {
     manejarError(res, error, 'Error al crear la solicitud');
   }
 });
 
 // 4. Reemplazar los ítems (solo mientras la solicitud está en CREADA)
-router.put('/:id/items', async (req, res) => {
+router.put('/:id/items', autorizar('sbo:crear'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const solicitud = await prisma.$transaction(async (tx) => {
@@ -160,20 +161,22 @@ router.put('/:id/items', async (req, res) => {
       });
     }, OPCIONES_TX);
 
-    res.json(conAcciones(solicitud));
+    res.json(conAcciones(solicitud, req.usuario));
   } catch (error) {
     manejarError(res, error, 'Error al actualizar los ítems');
   }
 });
 
 // 5. Ejecutar una transición de la máquina de estados
-//    Body: { accion, usuario, alistador?, cantidades?: { [itemId]: n }, nota? }
+//    Body: { accion, alistador?, cantidades?: { [itemId]: n }, nota? }
+//    Cada acción exige su permiso (auth/permisos.js: PERMISO_TRANSICION)
 router.post('/:id/transicion', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { accion, usuario, alistador, cantidades = {}, nota } = req.body;
-    if (!usuario) {
-      return res.status(400).json({ error: 'El usuario es obligatorio.' });
+    const { accion, alistador, cantidades = {}, nota } = req.body;
+    const usuario = req.usuario.usuario;
+    if (PERMISO_TRANSICION[accion] && !tienePermiso(req.usuario.rol, PERMISO_TRANSICION[accion])) {
+      return res.status(403).json({ error: 'No tiene permiso para realizar esta acción.', codigo: 'SIN_PERMISO' });
     }
 
     const solicitud = await prisma.$transaction(async (tx) => {
@@ -208,7 +211,11 @@ router.post('/:id/transicion', async (req, res) => {
         if (!alistador) {
           throw new StockError(400, 'Debe asignar un alistador para iniciar el alistamiento.');
         }
-        datos.alistador = alistador;
+        const persona = await tx.usuario.findFirst({ where: { usuario: alistador, activo: true, rol: { in: ROLES_ALISTADORES } } });
+        if (!persona) {
+          throw new StockError(400, `"${alistador}" no es un alistador activo.`);
+        }
+        datos.alistador = persona.usuario;
       }
 
       if (accion === 'finalizar') {
@@ -234,14 +241,8 @@ router.post('/:id/transicion', async (req, res) => {
         for (const [codigo, cantidad] of Object.entries(alistadas)) {
           await despacharReservado(tx, codigo, cantidad, solicitadas[codigo]);
           if (cantidad === 0) continue;
-          await tx.historial.create({
-            data: {
-              codigo_producto: codigo,
-              accion: 'SALIDA SBO',
-              operario: usuario,
-              detalles: `Despacho de ${cantidad} unidades. SBO ${actual.codigo_sbo} → ${actual.beneficiario}`
-            }
-          });
+          await registrarHistorial(tx, codigo, 'SALIDA SBO', req.usuario,
+            `Despacho de ${cantidad} unidades. SBO ${actual.codigo_sbo} → ${actual.beneficiario}`);
         }
       }
 
@@ -254,14 +255,8 @@ router.post('/:id/transicion', async (req, res) => {
       await tx.solicitudEvento.create({
         data: { solicitudId: id, estado_anterior: actual.estado, estado_nuevo: transicion.hacia, usuario, nota }
       });
-      await tx.historial.create({
-        data: {
-          codigo_producto: actual.codigo_sbo,
-          accion: `SBO ${transicion.hacia}`,
-          operario: usuario,
-          detalles: nota || `${actual.estado} → ${transicion.hacia}${datos.alistador ? ` (alistador: ${datos.alistador})` : ''}`
-        }
-      });
+      await registrarHistorial(tx, actual.codigo_sbo, `SBO ${transicion.hacia}`, req.usuario,
+        nota || `${actual.estado} → ${transicion.hacia}${datos.alistador ? ` (alistador: ${datos.alistador})` : ''}`);
 
       return tx.solicitud.findUnique({
         where: { id },
@@ -269,7 +264,7 @@ router.post('/:id/transicion', async (req, res) => {
       });
     }, OPCIONES_TX);
 
-    res.json(conAcciones(solicitud));
+    res.json(conAcciones(solicitud, req.usuario));
   } catch (error) {
     manejarError(res, error, 'Error al cambiar el estado de la solicitud');
   }

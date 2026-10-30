@@ -2,6 +2,8 @@ const express = require('express');
 const prisma = require('../lib/prisma');
 const { descontarStock, StockError } = require('../lib/stock');
 const { manejarError, esEnteroPositivo, campoFaltante } = require('../lib/errores');
+const { registrarHistorial } = require('../lib/historial');
+const { autorizar } = require('../auth/middleware');
 
 const router = express.Router();
 
@@ -12,8 +14,7 @@ const ESTADOS_SBO_ACTIVOS = ['CREADA', 'APROBADA', 'EN_ALISTAMIENTO', 'ALISTADA'
 
 // Cada acción sobre el inventario guarda su auditoría en la misma transacción:
 // o quedan registrados ambos (movimiento + historial) o ninguno.
-const registrarHistorial = (tx, codigo_producto, accion, operario, detalles) =>
-  tx.historial.create({ data: { codigo_producto, accion, operario, detalles } });
+// El autor es siempre el usuario autenticado (req.usuario); se ignora cualquier "operario" del cuerpo.
 
 const idValido = (req, res) => {
   const id = Number(req.params.id);
@@ -25,7 +26,7 @@ const idValido = (req, res) => {
 };
 
 // Obtener el inventario de productos
-router.get('/productos', async (req, res) => {
+router.get('/productos', autorizar('inventario:ver'), async (req, res) => {
   try {
     const productos = await prisma.producto.findMany({ orderBy: { fecha_ingreso: 'desc' } });
     res.json(productos);
@@ -35,9 +36,9 @@ router.get('/productos', async (req, res) => {
 });
 
 // Ingreso: crea el producto o, si el código ya existe, suma la cantidad a su stock
-router.post('/productos', async (req, res) => {
+router.post('/productos', autorizar('movimientos:registrar'), async (req, res) => {
   try {
-    const faltante = campoFaltante(req.body, ['codigo_producto', 'descripcion', 'categoria', 'operario']);
+    const faltante = campoFaltante(req.body, ['codigo_producto', 'descripcion', 'categoria']);
     if (faltante) {
       return res.status(400).json({ error: `El campo "${faltante}" es obligatorio.` });
     }
@@ -47,7 +48,7 @@ router.post('/productos', async (req, res) => {
     }
 
     const codigo_producto = req.body.codigo_producto.trim();
-    const { descripcion, categoria, operario } = req.body;
+    const { descripcion, categoria } = req.body;
     const estado = req.body.estado || 'Bueno';
     const ubicacion_general = req.body.ubicacion_general || 'Recepción';
 
@@ -59,7 +60,7 @@ router.post('/productos', async (req, res) => {
           where: { id: existente.id },
           data: { cantidad: { increment: cantidad } }
         });
-        await registrarHistorial(tx, codigo_producto, 'INGRESO ADICIONAL', operario,
+        await registrarHistorial(tx, codigo_producto, 'INGRESO ADICIONAL', req.usuario,
           `Ingresó cantidad: ${cantidad}. Stock total: ${producto.cantidad}`);
         return { producto, adicional: true };
       }
@@ -67,7 +68,7 @@ router.post('/productos', async (req, res) => {
       const producto = await tx.producto.create({
         data: { codigo_producto, descripcion, categoria, cantidad, estado, ubicacion_general }
       });
-      await registrarHistorial(tx, codigo_producto, 'INGRESO NUEVO', operario, `Ingresó cantidad: ${cantidad}`);
+      await registrarHistorial(tx, codigo_producto, 'INGRESO NUEVO', req.usuario, `Ingresó cantidad: ${cantidad}`);
       return { producto, adicional: false };
     }, OPCIONES_TX);
 
@@ -78,16 +79,16 @@ router.post('/productos', async (req, res) => {
 });
 
 // Reubicar un producto
-router.put('/productos/:id', async (req, res) => {
+router.put('/productos/:id', autorizar('productos:reubicar'), async (req, res) => {
   try {
     const id = idValido(req, res);
     if (id === null) return;
 
-    const faltante = campoFaltante(req.body, ['codigo_estanteria', 'operario']);
+    const faltante = campoFaltante(req.body, ['codigo_estanteria']);
     if (faltante) {
       return res.status(400).json({ error: `El campo "${faltante}" es obligatorio.` });
     }
-    const { codigo_estanteria, operario } = req.body;
+    const { codigo_estanteria } = req.body;
     const ubicacion_general = req.body.ubicacion_general || 'Almacenamiento';
 
     const producto = await prisma.$transaction(async (tx) => {
@@ -95,7 +96,7 @@ router.put('/productos/:id', async (req, res) => {
         where: { id },
         data: { ubicacion_general, codigo_estanteria: codigo_estanteria.trim() }
       });
-      await registrarHistorial(tx, actualizado.codigo_producto, 'REUBICACIÓN', operario, `Movido a: ${actualizado.codigo_estanteria}`);
+      await registrarHistorial(tx, actualizado.codigo_producto, 'REUBICACIÓN', req.usuario, `Movido a: ${actualizado.codigo_estanteria}`);
       return actualizado;
     }, OPCIONES_TX);
 
@@ -106,15 +107,10 @@ router.put('/productos/:id', async (req, res) => {
 });
 
 // Eliminar un producto del inventario (bloqueado si tiene Solicitudes SBO en curso)
-router.delete('/productos/:id', async (req, res) => {
+router.delete('/productos/:id', autorizar('productos:eliminar'), async (req, res) => {
   try {
     const id = idValido(req, res);
     if (id === null) return;
-
-    const operario = req.body?.operario;
-    if (!operario) {
-      return res.status(400).json({ error: 'El campo "operario" es obligatorio.' });
-    }
 
     await prisma.$transaction(async (tx) => {
       const producto = await tx.producto.findUnique({ where: { id } });
@@ -131,7 +127,7 @@ router.delete('/productos/:id', async (req, res) => {
       }
 
       await tx.producto.delete({ where: { id } });
-      await registrarHistorial(tx, producto.codigo_producto, 'ELIMINACIÓN', operario,
+      await registrarHistorial(tx, producto.codigo_producto, 'ELIMINACIÓN', req.usuario,
         `Artículo retirado del sistema (tenía ${producto.cantidad} unidades)`);
     }, OPCIONES_TX);
 
@@ -142,11 +138,11 @@ router.delete('/productos/:id', async (req, res) => {
 });
 
 // Salida manual de inventario
-router.post('/salida', async (req, res) => {
+router.post('/salida', autorizar('movimientos:registrar'), async (req, res) => {
   try {
-    const { codigo_producto, cantidad_retirada, motivo, operario } = req.body;
+    const { codigo_producto, cantidad_retirada, motivo } = req.body;
 
-    const faltante = campoFaltante(req.body, ['codigo_producto', 'motivo', 'operario']);
+    const faltante = campoFaltante(req.body, ['codigo_producto', 'motivo']);
     if (faltante) {
       return res.status(400).json({ error: `El campo "${faltante}" es obligatorio.` });
     }
@@ -156,7 +152,7 @@ router.post('/salida', async (req, res) => {
 
     const nuevaCantidad = await prisma.$transaction(async (tx) => {
       const restante = await descontarStock(tx, codigo_producto.trim(), cantidad_retirada);
-      await registrarHistorial(tx, codigo_producto.trim(), 'SALIDA/RETIRO', operario,
+      await registrarHistorial(tx, codigo_producto.trim(), 'SALIDA/RETIRO', req.usuario,
         `Retiro de ${cantidad_retirada} unidades. Motivo: ${motivo}`);
       return restante;
     }, OPCIONES_TX);

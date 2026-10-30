@@ -5,3 +5,7 @@ node_modules
 .claude/skills
 .cursor
 .devin
+.env.*
+!.env.example
+credenciales-iniciales.txt
+respaldos/

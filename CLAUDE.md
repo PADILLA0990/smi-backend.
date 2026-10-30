@@ -6,24 +6,31 @@ API de inventario de **no perecederos** del Banco de Alimentos de Bogotá. Nada 
 Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue automático en Render desde `main`. No migrar a otra tecnología.
 
 ## Comandos
-- `npm run dev`: servidor con nodemon (puerto 3000).
-- `npm test`: 33 pruebas de integración y las pruebas unitarias. Levanta su propio servidor en el puerto 3999 y usa solo datos `TEST-`, que limpia antes y después.
+- `npm run dev`: servidor con nodemon (puerto 3000). Requiere `JWT_SECRET` (ver `.env.example`).
+- `npm run dev:pruebas`: servidor en el puerto 3001 contra el esquema `smi_pruebas` (`.env.pruebas`).
+- `npm test`: pruebas de integración (autenticación, permisos y las 33 originales) y pruebas unitarias. Corre en `smi_pruebas`, levanta su propio servidor en el puerto 3999 y usa solo datos y usuarios `TEST-`, que limpia antes y después.
+- `npm run usuarios:iniciales`: crea admin, Operario01 y Operario02 con contraseñas temporales en `credenciales-iniciales.txt` (fuera de git). Nunca mostrar ese archivo en el chat.
 - `npm run verificar [-- --api <URL>]`: consistencia historial ↔ stock, solo lectura.
 
 ## Estructura
-- `index.js`: app, historial y manejo de JSON inválido.
+- `index.js`: solo arranca el servidor. `app.js`: middlewares (helmet, CORS, cookies), rutas, historial y manejo de errores.
+- `lib/config.js`: variables de entorno con valores por defecto.
+- `auth/`: login, refresh, logout y cambio de contraseña (`routes.js`), `autenticar` y `autorizar` (`middleware.js`), matriz de permisos (`permisos.js`), bcrypt y JWT (`credenciales.js`).
+- `usuarios/routes.js`: gestión de usuarios (Administrador).
+- `lib/historial.js`: `registrarHistorial(tx, codigo, accion, req.usuario, detalles)`. El autor siempre sale de la sesión.
 - `productos/routes.js`: productos, ingreso, salida, reubicar y eliminar.
 - `solicitudes/`: SBO (`estados.js` es la máquina de estados).
 - `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`.
 - `lib/errores.js`: errores con status y mensajes en español.
 - `scripts/verificar-consistencia.js`: lógica pura reutilizable para Conciliación.
-- `docs/`: PROGRESO.md, SUPUESTOS.md y, más adelante, API.md. Es la documentación compartida con el frontend.
+- `docs/`: PROGRESO.md, SUPUESTOS.md y API.md. Es la documentación compartida con el frontend.
 
 ## Reglas
 - Todo movimiento de stock y su historial van en **la misma transacción** (`prisma.$transaction`).
 - **Cualquier cambio en la base de producción requiere autorización explícita del usuario.**
-  - Hoy no hay carpeta `prisma/migrations`: el esquema se aplicó con `db push`.
-  - Desde la Fase B: migraciones versionadas y aditivas. Primero se crea la línea base (`0_init` + `migrate resolve --applied`) y se prueba en un PostgreSQL local.
+  - Migraciones versionadas y aditivas en `prisma/migrations` (nunca `db push`). Se prueban primero con `migrate deploy` en `smi_pruebas`.
+  - En producción, la primera vez se marca la línea base con `migrate resolve --applied 0_init`. Antes de aplicar se respalda con `pg_dump`.
 - Productos reales en producción: ROP-005 y APP-005. No tocarlos.
+- Toda ruta nueva bajo `/api` necesita `autorizar('<permiso>')`; los permisos están en `auth/permisos.js`.
 - Commits en español, solo cuando el usuario los pida; desplegar solo con autorización.
 - Fuera de alcance: escáner, la página del Mapa de Bodega (solo se exponen endpoints) y perecederos.
