@@ -4,8 +4,42 @@ const { descontarStock, StockError } = require('../lib/stock');
 const { manejarError, esEnteroPositivo, campoFaltante } = require('../lib/errores');
 const { registrarHistorial } = require('../lib/historial');
 const { autorizar } = require('../auth/middleware');
+const { CONDICIONES, GRUPOS, resolverActivo } = require('../lib/catalogos');
 
 const router = express.Router();
+
+// Atributos opcionales del producto (Fase C). Devuelve solo los campos enviados, ya validados.
+function validarAtributos(body) {
+  const data = {};
+  if ('talla' in body) {
+    const talla = typeof body.talla === 'string' ? body.talla.trim() : '';
+    if (talla.length > 20) throw new StockError(400, 'Talla: máximo 20 caracteres.');
+    data.talla = talla || null;
+  }
+  if ('condicion' in body) {
+    if (body.condicion && !Object.hasOwn(CONDICIONES, body.condicion)) throw new StockError(400, 'Condición no válida.');
+    data.condicion = body.condicion || null;
+  }
+  if ('grupo' in body) {
+    if (body.grupo && !GRUPOS.includes(body.grupo)) throw new StockError(400, 'Género o grupo etario no válido.');
+    data.grupo = body.grupo || null;
+  }
+  if ('stock_minimo' in body) {
+    const vacio = body.stock_minimo === null || body.stock_minimo === '';
+    const n = Number(body.stock_minimo);
+    if (!vacio && (!Number.isInteger(n) || n < 0 || n > 100000)) throw new StockError(400, 'Stock mínimo: número entero entre 0 y 100.000.');
+    data.stock_minimo = vacio ? null : n;
+  }
+  return data;
+}
+
+// La categoría llega como id (categoriaId) o por nombre (categoria); debe estar activa en el catálogo
+const resolverCategoria = (tx, body) =>
+  resolverActivo(tx, 'categoria', body.categoriaId ?? body.categoria, { etiqueta: 'La categoría' });
+
+// Una ubicación del catálogo, por su código
+const resolverUbicacion = (tx, codigo) =>
+  resolverActivo(tx, 'ubicacion', codigo, { campoTexto: 'codigo', etiqueta: 'La ubicación' });
 
 const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
 
@@ -28,8 +62,12 @@ const idValido = (req, res) => {
 // Obtener el inventario de productos
 router.get('/productos', autorizar('inventario:ver'), async (req, res) => {
   try {
-    const productos = await prisma.producto.findMany({ orderBy: { fecha_ingreso: 'desc' } });
-    res.json(productos);
+    const productos = await prisma.producto.findMany({
+      orderBy: { fecha_ingreso: 'desc' },
+      include: { categoriaRef: { select: { nombre: true, prefijo: true } } }
+    });
+    // "categoria" muestra el nombre vigente del catálogo; el texto original queda solo para productos sin enlazar
+    res.json(productos.map(({ categoriaRef, ...p }) => ({ ...p, categoria: categoriaRef?.nombre ?? p.categoria })));
   } catch (error) {
     manejarError(res, error, 'Error al conectar con la base de datos');
   }
@@ -38,7 +76,7 @@ router.get('/productos', autorizar('inventario:ver'), async (req, res) => {
 // Ingreso: crea el producto o, si el código ya existe, suma la cantidad a su stock
 router.post('/productos', autorizar('movimientos:registrar'), async (req, res) => {
   try {
-    const faltante = campoFaltante(req.body, ['codigo_producto', 'descripcion', 'categoria']);
+    const faltante = campoFaltante(req.body, ['codigo_producto', 'descripcion']);
     if (faltante) {
       return res.status(400).json({ error: `El campo "${faltante}" es obligatorio.` });
     }
@@ -48,14 +86,14 @@ router.post('/productos', autorizar('movimientos:registrar'), async (req, res) =
     }
 
     const codigo_producto = req.body.codigo_producto.trim();
-    const { descripcion, categoria } = req.body;
-    const estado = req.body.estado || 'Bueno';
-    const ubicacion_general = req.body.ubicacion_general || 'Recepción';
+    const descripcion = req.body.descripcion.trim();
+    const atributos = validarAtributos(req.body);
 
     const resultado = await prisma.$transaction(async (tx) => {
       const existente = await tx.producto.findUnique({ where: { codigo_producto } });
 
       if (existente) {
+        if (!existente.activo) throw new StockError(409, `El producto ${codigo_producto} está inactivo. Actívelo antes de registrar ingresos.`);
         const producto = await tx.producto.update({
           where: { id: existente.id },
           data: { cantidad: { increment: cantidad } }
@@ -65,8 +103,21 @@ router.post('/productos', autorizar('movimientos:registrar'), async (req, res) =
         return { producto, adicional: true };
       }
 
+      // Producto nuevo: la categoría y la ubicación deben existir en los catálogos
+      if (req.body.categoriaId === undefined && (typeof req.body.categoria !== 'string' || !req.body.categoria.trim())) {
+        throw new StockError(400, 'El campo "categoria" es obligatorio.');
+      }
+      const categoria = await resolverCategoria(tx, req.body);
+      const ubicacion = await resolverUbicacion(tx, req.body.ubicacion_general || 'Recepción');
       const producto = await tx.producto.create({
-        data: { codigo_producto, descripcion, categoria, cantidad, estado, ubicacion_general }
+        data: {
+          codigo_producto, descripcion, cantidad, ...atributos,
+          categoria: categoria.nombre,
+          categoriaId: categoria.id,
+          // "estado" (texto) se conserva por compatibilidad y refleja la condición
+          estado: atributos.condicion ? CONDICIONES[atributos.condicion] : (req.body.estado || 'Bueno'),
+          ubicacion_general: ubicacion.codigo
+        }
       });
       await registrarHistorial(tx, codigo_producto, 'INGRESO NUEVO', req.usuario, `Ingresó cantidad: ${cantidad}`);
       return { producto, adicional: false };
@@ -88,13 +139,13 @@ router.put('/productos/:id', autorizar('productos:reubicar'), async (req, res) =
     if (faltante) {
       return res.status(400).json({ error: `El campo "${faltante}" es obligatorio.` });
     }
-    const { codigo_estanteria } = req.body;
-    const ubicacion_general = req.body.ubicacion_general || 'Almacenamiento';
-
     const producto = await prisma.$transaction(async (tx) => {
+      if (!(await tx.producto.findUnique({ where: { id } }))) throw new StockError(404, 'El producto no existe.');
+      // Solo se puede mover a una ubicación activa del catálogo
+      const ubicacion = await resolverUbicacion(tx, req.body.codigo_estanteria);
       const actualizado = await tx.producto.update({
         where: { id },
-        data: { ubicacion_general, codigo_estanteria: codigo_estanteria.trim() }
+        data: { ubicacion_general: ubicacion.zona || 'Almacenamiento', codigo_estanteria: ubicacion.codigo }
       });
       await registrarHistorial(tx, actualizado.codigo_producto, 'REUBICACIÓN', req.usuario, `Movido a: ${actualizado.codigo_estanteria}`);
       return actualizado;
@@ -137,23 +188,80 @@ router.delete('/productos/:id', autorizar('productos:eliminar'), async (req, res
   }
 });
 
+// Editar datos descriptivos del producto (no cambia stock ni ubicación)
+const ETIQUETAS_EDICION = {
+  descripcion: 'descripción', categoria: 'categoría', talla: 'talla', condicion: 'condición',
+  grupo: 'grupo', stock_minimo: 'stock mínimo', activo: 'activo'
+};
+
+router.patch('/productos/:id', autorizar('productos:editar'), async (req, res) => {
+  try {
+    const id = idValido(req, res);
+    if (id === null) return;
+    const body = req.body || {};
+    const data = validarAtributos(body);
+    if ('descripcion' in body) {
+      const descripcion = typeof body.descripcion === 'string' ? body.descripcion.trim() : '';
+      if (!descripcion || descripcion.length > 200) return res.status(400).json({ error: 'La descripción es obligatoria (máximo 200 caracteres).' });
+      data.descripcion = descripcion;
+    }
+    if ('activo' in body) {
+      if (typeof body.activo !== 'boolean') return res.status(400).json({ error: 'El campo "activo" debe ser verdadero o falso.' });
+      data.activo = body.activo;
+    }
+
+    const producto = await prisma.$transaction(async (tx) => {
+      const actual = await tx.producto.findUnique({ where: { id } });
+      if (!actual) throw new StockError(404, 'El producto no existe.');
+      if ('categoriaId' in body || 'categoria' in body) {
+        const categoria = await resolverCategoria(tx, body);
+        data.categoria = categoria.nombre;
+        data.categoriaId = categoria.id;
+      }
+      if (data.condicion) data.estado = CONDICIONES[data.condicion];
+
+      const cambios = Object.keys(ETIQUETAS_EDICION).filter(c => c in data && data[c] !== actual[c]);
+      if (cambios.length === 0) throw new StockError(400, 'No hay cambios para guardar.');
+      const actualizado = await tx.producto.update({ where: { id }, data });
+      const mostrar = (c, v) => (v === null || v === undefined ? 'vacío' : c === 'condicion' ? CONDICIONES[v] : c === 'activo' ? (v ? 'sí' : 'no') : v);
+      await registrarHistorial(tx, actual.codigo_producto, 'EDICIÓN', req.usuario,
+        cambios.map(c => `${ETIQUETAS_EDICION[c]}: ${mostrar(c, actual[c])} → ${mostrar(c, data[c])}`).join('; '));
+      return actualizado;
+    }, OPCIONES_TX);
+
+    res.json(producto);
+  } catch (error) {
+    manejarError(res, error, 'Error al editar el producto');
+  }
+});
+
 // Salida manual de inventario
 router.post('/salida', autorizar('movimientos:registrar'), async (req, res) => {
   try {
-    const { codigo_producto, cantidad_retirada, motivo } = req.body;
+    const { codigo_producto, cantidad_retirada } = req.body;
 
-    const faltante = campoFaltante(req.body, ['codigo_producto', 'motivo']);
+    const faltante = campoFaltante(req.body, ['codigo_producto']);
     if (faltante) {
       return res.status(400).json({ error: `El campo "${faltante}" es obligatorio.` });
+    }
+    const motivoEnviado = req.body.motivoId ?? req.body.motivo;
+    if (motivoEnviado === undefined || motivoEnviado === null || String(motivoEnviado).trim() === '') {
+      return res.status(400).json({ error: 'El campo "motivo" es obligatorio.' });
     }
     if (!esEnteroPositivo(cantidad_retirada)) {
       return res.status(400).json({ error: 'La cantidad a retirar debe ser un número entero mayor a 0.' });
     }
+    const detalle = typeof req.body.detalle === 'string' ? req.body.detalle.trim() : '';
+    if (detalle.length > 200) {
+      return res.status(400).json({ error: 'El detalle admite máximo 200 caracteres.' });
+    }
 
     const nuevaCantidad = await prisma.$transaction(async (tx) => {
+      // El motivo sale del catálogo de motivos de salida
+      const motivo = await resolverActivo(tx, 'motivo', motivoEnviado, { extra: { tipo: 'SALIDA' }, etiqueta: 'El motivo de salida' });
       const restante = await descontarStock(tx, codigo_producto.trim(), cantidad_retirada);
       await registrarHistorial(tx, codigo_producto.trim(), 'SALIDA/RETIRO', req.usuario,
-        `Retiro de ${cantidad_retirada} unidades. Motivo: ${motivo}`);
+        `Retiro de ${cantidad_retirada} unidades. Motivo: ${motivo.nombre}${detalle ? `. Detalle: ${detalle}` : ''}`);
       return restante;
     }, OPCIONES_TX);
 

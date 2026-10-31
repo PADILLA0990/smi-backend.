@@ -10,6 +10,7 @@ const authRoutes = require('./auth/routes');
 const usuariosRoutes = require('./usuarios/routes');
 const productosRoutes = require('./productos/routes');
 const solicitudesRoutes = require('./solicitudes/routes');
+const { router: catalogosRoutes } = require('./catalogos/routes');
 
 const app = express();
 
@@ -52,6 +53,9 @@ app.get('/api/historial', autorizar('inventario:ver'), async (req, res) => {
 });
 
 app.use('/api/solicitudes', solicitudesRoutes);
+
+// Catálogos, parámetros y ubicaciones (estas últimas las consume el Mapa de Bodega)
+app.use('/api', catalogosRoutes);
 
 // Ruta de API inexistente
 app.use('/api', (req, res) => {

@@ -6,6 +6,7 @@ const { manejarError: manejarErrorGeneral, esEnteroPositivo } = require('../lib/
 const { validarTransicion, accionesDisponibles } = require('./estados');
 const { registrarHistorial } = require('../lib/historial');
 const { autorizar } = require('../auth/middleware');
+const { resolverActivo } = require('../lib/catalogos');
 const { tienePermiso, PERMISO_TRANSICION, ROLES_ALISTADORES } = require('../auth/permisos');
 
 const router = express.Router();
@@ -109,18 +110,23 @@ router.get('/:id', autorizar('inventario:ver'), async (req, res) => {
 // 3. Crear una solicitud SBO con sus ítems
 router.post('/', autorizar('sbo:crear'), async (req, res) => {
   try {
-    const { codigo_sbo, beneficiario, fecha_requerida, observaciones, items } = req.body;
+    const { codigo_sbo, fecha_requerida, observaciones, items } = req.body;
     const creado_por = req.usuario.usuario;
-    if (!codigo_sbo || !beneficiario) {
+    // El beneficiario es una organización del catálogo (por id o por nombre)
+    const beneficiarioEnviado = req.body.organizacionId ?? req.body.beneficiario;
+    if (!codigo_sbo || beneficiarioEnviado === undefined || beneficiarioEnviado === null || String(beneficiarioEnviado).trim() === '') {
       return res.status(400).json({ error: 'Código SBO y beneficiario son obligatorios.' });
     }
 
     const solicitud = await prisma.$transaction(async (tx) => {
+      const organizacion = await resolverActivo(tx, 'organizacion', beneficiarioEnviado, { etiqueta: 'La organización beneficiaria' });
+      const beneficiario = organizacion.nombre;
       const itemsPreparados = await prepararItems(tx, items);
       const nueva = await tx.solicitud.create({
         data: {
           codigo_sbo,
           beneficiario,
+          organizacionId: organizacion.id,
           creado_por,
           observaciones,
           fecha_requerida: fecha_requerida ? new Date(fecha_requerida) : null,

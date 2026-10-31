@@ -9,16 +9,26 @@ datasource db {
 }
 
 model Producto {
-  id                 Int      @id @default(autoincrement())
-  codigo_producto    String   @unique
+  id                 Int        @id @default(autoincrement())
+  codigo_producto    String     @unique
   descripcion        String
   categoria          String
   cantidad           Int
-  cantidad_reservada Int      @default(0) // Apartada por Solicitudes SBO aprobadas, aún no despachadas
+  cantidad_reservada Int        @default(0) // Apartada por Solicitudes SBO aprobadas, aún no despachadas
   estado             String
   ubicacion_general  String
   codigo_estanteria  String?
-  fecha_ingreso      DateTime @default(now())
+  fecha_ingreso      DateTime   @default(now())
+  // Fase C: catálogos y atributos (opcionales para no afectar productos existentes)
+  categoriaId        Int?
+  categoriaRef       Categoria? @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+  talla              String?
+  condicion          Condicion?
+  grupo              String? // Género o grupo etario (lista fija en lib/catalogos.js)
+  stock_minimo       Int? // Vacío: se usa el parámetro stock_minimo_defecto
+  activo             Boolean    @default(true)
+
+  @@index([categoriaId])
 }
 
 model Historial {
@@ -48,7 +58,9 @@ enum EstadoSolicitud {
 model Solicitud {
   id                        Int               @id @default(autoincrement())
   codigo_sbo                String            @unique
-  beneficiario              String
+  beneficiario              String // Nombre de la organización al crear (texto: conserva solicitudes antiguas)
+  organizacionId            Int?
+  organizacion              Organizacion?     @relation(fields: [organizacionId], references: [id], onDelete: SetNull)
   estado                    EstadoSolicitud   @default(CREADA)
   creado_por                String
   alistador                 String?
@@ -62,6 +74,8 @@ model Solicitud {
   fecha_cancelacion         DateTime?
   items                     SolicitudItem[]
   eventos                   SolicitudEvento[]
+
+  @@index([organizacionId])
 }
 
 model SolicitudItem {
@@ -127,4 +141,105 @@ model SesionRefresh {
   creado_en   DateTime  @default(now())
 
   @@index([usuarioId])
+}
+
+// --- CATÁLOGOS Y PARÁMETROS (Fase C) ---
+// Nunca se borran registros de catálogo: se desactivan (activo = false).
+
+enum Condicion {
+  PERFECTO
+  BUENO
+  DETERIORO
+  DANADO
+}
+
+enum TipoTercero {
+  DONANTE
+  PROVEEDOR
+  AMBOS
+}
+
+enum TipoMotivo {
+  SALIDA
+  AJUSTE
+  NOVEDAD
+}
+
+model Categoria {
+  id             Int        @id @default(autoincrement())
+  nombre         String     @unique
+  prefijo        String?    @unique // Prefijo sugerido para códigos de producto (ROP, APP…)
+  descripcion    String?
+  activo         Boolean    @default(true)
+  creado_en      DateTime   @default(now())
+  actualizado_en DateTime   @updatedAt
+  productos      Producto[]
+}
+
+model Organizacion {
+  id             Int         @id @default(autoincrement())
+  nombre         String      @unique
+  nit            String?     @unique
+  contacto       String?
+  telefono       String?
+  correo         String?
+  localidad      String?
+  direccion      String?
+  activo         Boolean     @default(true)
+  creado_en      DateTime    @default(now())
+  actualizado_en DateTime    @updatedAt
+  solicitudes    Solicitud[]
+}
+
+model Tercero {
+  id             Int         @id @default(autoincrement())
+  tipo           TipoTercero @default(DONANTE)
+  nombre         String      @unique
+  nit            String?     @unique
+  contacto       String?
+  telefono       String?
+  correo         String?
+  activo         Boolean     @default(true)
+  creado_en      DateTime    @default(now())
+  actualizado_en DateTime    @updatedAt
+}
+
+model Motivo {
+  id             Int        @id @default(autoincrement())
+  tipo           TipoMotivo
+  nombre         String
+  activo         Boolean    @default(true)
+  creado_en      DateTime   @default(now())
+  actualizado_en DateTime   @updatedAt
+
+  @@unique([tipo, nombre])
+}
+
+model UnidadManejo {
+  id             Int      @id @default(autoincrement())
+  nombre         String   @unique
+  abreviatura    String?
+  factor         Int      @default(1) // Cuántas unidades de inventario equivale
+  activo         Boolean  @default(true)
+  creado_en      DateTime @default(now())
+  actualizado_en DateTime @updatedAt
+}
+
+model Ubicacion {
+  id             Int      @id @default(autoincrement())
+  codigo         String   @unique // Lo que se guarda en Producto.codigo_estanteria (o ubicacion_general para Recepción)
+  nombre         String?
+  zona           String?
+  estante        String?
+  nivel          String?
+  posicion       String?
+  activo         Boolean  @default(true)
+  creado_en      DateTime @default(now())
+  actualizado_en DateTime @updatedAt
+}
+
+model Parametro {
+  clave          String   @id
+  valor          String
+  actualizado_en DateTime @updatedAt
 }

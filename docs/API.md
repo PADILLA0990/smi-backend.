@@ -44,11 +44,13 @@ La matriz está en `auth/permisos.js`. El frontend recibe `permisos[]` y solo lo
 | `movimientos:registrar` (ingreso, salida) | ✔ | ✔ | ✔ | |
 | `productos:reubicar` | ✔ | ✔ | ✔ | |
 | `productos:eliminar` | ✔ | ✔ | | |
+| `productos:editar` (descripción, categoría, talla, condición, stock mínimo, activo) | ✔ | ✔ | | |
 | `sbo:crear` (crear, editar ítems) | ✔ | ✔ | ✔ | |
 | `sbo:alistar` (iniciar y finalizar alistamiento) | ✔ | ✔ | ✔ | |
 | `sbo:aprobar` | ✔ | ✔ | | |
 | `sbo:despachar` | ✔ | ✔ | | |
 | `sbo:cancelar` | ✔ | ✔ | | |
+| `configuracion:gestionar` (catálogos y parámetros) | ✔ | ✔ | | |
 | `usuarios:gestionar` | ✔ | | | |
 
 - Solo pueden ser alistadores los usuarios activos con rol Operario o Coordinador.
@@ -66,16 +68,64 @@ La matriz está en `auth/permisos.js`. El frontend recibe `permisos[]` y solo lo
 
 ## Inventario y SBO
 
-Las rutas no cambiaron, pero ahora exigen sesión y permiso. Se describirán en detalle en la Fase H.
+Exigen sesión y permiso. Desde la Fase C, la categoría, la ubicación, el motivo de salida y la organización deben existir **activos** en su catálogo. Se envían por id o por nombre (sin distinguir mayúsculas). Si no existen, la respuesta es 400.
 
 | Ruta | Permiso |
 |---|---|
 | GET `/productos`, `/historial`, `/solicitudes`, `/solicitudes/:id` | `inventario:ver` |
-| POST `/productos` (ingreso) y POST `/salida` | `movimientos:registrar` |
-| PUT `/productos/:id` (reubicar) | `productos:reubicar` |
+| POST `/productos` (ingreso): `{ codigo_producto, descripcion, cantidad, categoriaId \| categoria, ubicacion_general?, condicion?, talla?, grupo?, stock_minimo? }` | `movimientos:registrar` |
+| POST `/salida`: `{ codigo_producto, cantidad_retirada, motivoId \| motivo, detalle? }` (motivo de tipo SALIDA) | `movimientos:registrar` |
+| PUT `/productos/:id` (reubicar): `{ codigo_estanteria }` con el código de una ubicación del catálogo | `productos:reubicar` |
+| PATCH `/productos/:id` (editar datos, queda EDICIÓN en el historial) | `productos:editar` |
 | DELETE `/productos/:id` | `productos:eliminar` |
-| POST `/solicitudes` y PUT `/solicitudes/:id/items` | `sbo:crear` |
+| POST `/solicitudes`: `{ codigo_sbo, organizacionId \| beneficiario, items, … }` | `sbo:crear` |
+| PUT `/solicitudes/:id/items` | `sbo:crear` |
 | POST `/solicitudes/:id/transicion` | Según la acción: `aprobar` pide `sbo:aprobar`; `iniciar` y `finalizar` piden `sbo:alistar`; `despachar` pide `sbo:despachar`; `cancelar` pide `sbo:cancelar`. |
 
 - `POST /historial` se eliminó: el historial solo lo escribe el backend.
+- `GET /productos` devuelve en `categoria` el nombre vigente del catálogo, además de `categoriaId`, `talla`, `condicion`, `grupo`, `stock_minimo` y `activo`.
+- Un producto inactivo no recibe ingresos (409).
+
+## Catálogos (Fase C)
+
+`:catalogo` puede ser `categorias`, `organizaciones`, `terceros` (donantes y proveedores), `motivos`, `unidades` o `ubicaciones`. Los registros **no se borran**: se desactivan con `{ "activo": false }`.
+
+| Método | Ruta | Permiso | Notas |
+|---|---|---|---|
+| GET | `/catalogos/opciones` | `inventario:ver` | Listas fijas: `condiciones`, `grupos`, `tiposTercero`, `tiposMotivo`. |
+| GET | `/catalogos/:catalogo` | `inventario:ver` | `?activos=1` devuelve solo los activos. `?tipo=SALIDA` filtra motivos; `?tipo=DONANTE` o `PROVEEDOR` filtra terceros, incluidos los que son AMBOS. Las categorías traen el conteo de `productos`. |
+| POST | `/catalogos/:catalogo` | `configuracion:gestionar` | Valida cada campo; un nombre repetido da 409, sin importar mayúsculas. |
+| PATCH | `/catalogos/:catalogo/:id` | `configuracion:gestionar` | Edición parcial. El tipo de un motivo no se cambia. Una ubicación con productos no se desactiva ni cambia de código (409). Renombrar una categoría actualiza el texto en sus productos. |
+| GET | `/catalogos/categorias/:id/siguiente-codigo` | `inventario:ver` | Devuelve `{ codigo: "ROP-006" }`, o `null` si la categoría no tiene prefijo. |
+
+**Campos por catálogo:**
+- categorías: `nombre*`, `prefijo` (2 a 5 letras), `descripcion`;
+- organizaciones: `nombre*`, `nit`, `contacto`, `telefono`, `correo`, `localidad`, `direccion`;
+- terceros: `tipo*` (DONANTE, PROVEEDOR o AMBOS), `nombre*`, `nit`, `contacto`, `telefono`, `correo`;
+- motivos: `tipo*` (SALIDA, AJUSTE o NOVEDAD), `nombre*`;
+- unidades: `nombre*`, `abreviatura`, `factor*` (unidades que equivale);
+- ubicaciones: `codigo*`, `nombre`, `zona`, `estante`, `nivel`, `posicion`.
+
+## Parámetros
+
+| Método | Ruta | Permiso | Notas |
+|---|---|---|---|
+| GET | `/parametros` | `inventario:ver` | Devuelve `[{ clave, etiqueta, valor, defecto, min, max }]`. |
+| PUT | `/parametros` | `configuracion:gestionar` | Recibe `{ clave: valor }`. Una clave desconocida da 400. El lote pequeño debe ser menor que el mediano. |
+
+Claves disponibles:
+- `tiempo_meta_alistamiento_horas` (24);
+- `dias_atraso_sbo` (0);
+- `stock_minimo_defecto` (5);
+- `lote_pequeno_max` (10);
+- `lote_mediano_max` (50).
+
+## Ubicaciones para el Mapa de Bodega (solo lectura)
+
+| Método | Ruta | Permiso | Respuesta |
+|---|---|---|---|
+| GET | `/ubicaciones` | `inventario:ver` | `[{ id, codigo, nombre, zona, estante, nivel, posicion, activo, productos, unidades }]`. Por defecto solo las activas; `?todas=1` las incluye todas. |
+| GET | `/ubicaciones/:codigo/contenido` | `inventario:ver` | `{ ubicacion, productos: [{ id, codigo_producto, descripcion, categoria, cantidad, cantidad_reservada, condicion, talla, activo }], unidades }`. Si no existe, 404. |
+
+Un producto está en la ubicación de su `codigo_estanteria`. Si no tiene estantería asignada, está en su `ubicacion_general` (por ejemplo, Recepción).
 - El campo `operario` ya no se acepta en ninguna petición.

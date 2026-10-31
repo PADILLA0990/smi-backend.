@@ -17,12 +17,15 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - `lib/config.js`: variables de entorno con valores por defecto.
 - `auth/`: login, refresh, logout y cambio de contraseña (`routes.js`), `autenticar` y `autorizar` (`middleware.js`), matriz de permisos (`permisos.js`), bcrypt y JWT (`credenciales.js`).
 - `usuarios/routes.js`: gestión de usuarios (Administrador).
+- `catalogos/routes.js`: catálogos, parámetros y ubicaciones (`/api/ubicaciones`, para el Mapa).
+- `lib/catalogos.js`: definición y validación de catálogos, `resolverActivo` (busca por id o nombre) y parámetros con sus valores por defecto.
 - `lib/historial.js`: `registrarHistorial(tx, codigo, accion, req.usuario, detalles)`. El autor siempre sale de la sesión.
 - `productos/routes.js`: productos, ingreso, salida, reubicar y eliminar.
 - `solicitudes/`: SBO (`estados.js` es la máquina de estados).
 - `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`.
 - `lib/errores.js`: errores con status y mensajes en español.
 - `scripts/verificar-consistencia.js`: lógica pura reutilizable para Conciliación.
+- `scripts/migrar-catalogos.js`: pasa los textos libres a los catálogos (solo muestra; aplica con `--aplicar`).
 - `docs/`: PROGRESO.md, SUPUESTOS.md y API.md. Es la documentación compartida con el frontend.
 
 ## Reglas
@@ -31,6 +34,8 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
   - Migraciones versionadas y aditivas en `prisma/migrations` (nunca `db push`). Se prueban primero con `migrate deploy` en `smi_pruebas`.
   - En producción, la primera vez se marca la línea base con `migrate resolve --applied 0_init`. Antes de aplicar se respalda con `pg_dump`.
 - Productos reales en producción: ROP-005 y APP-005. No tocarlos.
+- Categoría, ubicación, motivo y organización siempre salen del catálogo (`resolverActivo`); nunca aceptar texto libre nuevo.
+- Hay testers usando producción: avisar al usuario 🔴 CERRADO antes de migrar o desplegar, y 🟢 ABIERTO cuando esté verificado.
 - Toda ruta nueva bajo `/api` necesita `autorizar('<permiso>')`; los permisos están en `auth/permisos.js`.
 - Commits en español, solo cuando el usuario los pida; desplegar solo con autorización.
 - Fuera de alcance: escáner, la página del Mapa de Bodega (solo se exponen endpoints) y perecederos.

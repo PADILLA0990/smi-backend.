@@ -10,11 +10,13 @@ const PERMISOS = {
   'movimientos:registrar': OPERACION, // ingresos y retiros
   'productos:reubicar': OPERACION,
   'productos:eliminar': SUPERVISION,
+  'productos:editar': SUPERVISION,   // descripción, categoría, talla, condición, stock mínimo, activo
   'sbo:crear': OPERACION,           // crear y editar ítems mientras está CREADA
   'sbo:alistar': OPERACION,         // iniciar y finalizar alistamiento
   'sbo:aprobar': SUPERVISION,
   'sbo:despachar': SUPERVISION,
   'sbo:cancelar': SUPERVISION,
+  'configuracion:gestionar': SUPERVISION, // catálogos y parámetros
   'usuarios:gestionar': ['ADMINISTRADOR']
 };
 

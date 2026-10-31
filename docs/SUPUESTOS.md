@@ -21,3 +21,10 @@ Reglas que no estaban definidas y se resolvieron con la opción más simple. Las
 | 15 | 30/10/2026 | `trust proxy` = 2 (Vercel y luego Render) para leer la IP real en el límite de intentos. | `lib/config.js` | `TRUST_PROXY` |
 | 16 | 30/10/2026 | La cookie de sesión es Secure por defecto. Solo se desactiva en local con `COOKIE_SEGURA=false`. | `lib/config.js` | `COOKIE_SEGURA` |
 | 17 | 30/10/2026 | El historial antiguo conserva su `operario` en texto, con `usuarioId` vacío. Los movimientos nuevos guardan ambos. | `lib/historial.js` | — |
+| 18 | 30/10/2026 | Los catálogos solo los modifican Coordinador y Administrador. Nada se borra: se desactiva. | `auth/permisos.js` | Sí (en código) |
+| 19 | 30/10/2026 | Las unidades iniciales y su equivalencia (Unidad 1, Par 1, Paquete 10, Caja 20, Paca 50) son de ejemplo. Se usarán en los movimientos desde la Fase D. | migración `2_catalogos` | Configuración → Unidades |
+| 20 | 30/10/2026 | Valores por defecto de los parámetros: alistamiento 24 h, 0 días de tolerancia para SBO atrasada, stock mínimo 5, lote pequeño ≤ 10 y mediano ≤ 50. | `lib/catalogos.js` | Configuración → Parámetros |
+| 21 | 30/10/2026 | Las condiciones (Perfecto estado, Buen estado, En deterioro, Dañado; definidas por el usuario el 31/10/2026) y los grupos (Mujer, Hombre, Unisex, Niña, Niño, Infantil unisex, Bebé, Adulto mayor) son listas fijas. | `lib/catalogos.js` | En código |
+| 22 | 30/10/2026 | El texto `categoria` y `estado` del producto se conserva por compatibilidad; la API muestra el nombre del catálogo y `estado` refleja la condición. | `productos/routes.js` | — |
+| 23 | 30/10/2026 | Al reubicar, `ubicacion_general` toma la zona de la ubicación (o "Almacenamiento" si no tiene zona). | `productos/routes.js` | Zona en el catálogo |
+| 24 | 30/10/2026 | Editar productos (categoría, condición, talla, stock mínimo, activo) es de Coordinador y Administrador. El operario solo registra movimientos. | `auth/permisos.js` | Sí (en código) |

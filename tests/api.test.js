@@ -34,6 +34,12 @@ async function limpiarDatosTest() {
   await prisma.historial.deleteMany({ where: { codigo_producto: { startsWith: 'TEST-' } } });
   await prisma.producto.deleteMany({ where: { codigo_producto: { startsWith: 'TEST-' } } });
   await prisma.usuario.deleteMany({ where: { usuario: { startsWith: 'TEST-' } } });
+  // Catálogos de prueba (los productos ya se borraron, así que nada los referencia)
+  for (const modelo of ['categoria', 'organizacion', 'tercero', 'motivo', 'unidadManejo']) {
+    await prisma[modelo].deleteMany({ where: { nombre: { startsWith: 'TEST-' } } });
+  }
+  await prisma.ubicacion.deleteMany({ where: { codigo: { startsWith: 'TEST-' } } });
+  await prisma.parametro.deleteMany(); // solo existe en el esquema de pruebas: vuelve a los valores por defecto
 }
 
 async function api(method, ruta, body, token = tokens.coord, extra = {}) {
@@ -53,6 +59,11 @@ before(async () => {
   for (const u of Object.values(USUARIOS)) {
     await prisma.usuario.create({ data: { ...u, nombre: u.usuario, password_hash: hash, debe_cambiar_password: false, activo: u !== USUARIOS.inactivo } });
   }
+  // Catálogos mínimos para las pruebas de inventario y SBO
+  await prisma.categoria.create({ data: { nombre: 'TEST-Cat', prefijo: 'TST' } });
+  await prisma.organizacion.create({ data: { nombre: 'TEST-Org' } });
+  await prisma.motivo.create({ data: { tipo: 'SALIDA', nombre: 'TEST-Motivo' } });
+  await prisma.ubicacion.create({ data: { codigo: 'TEST-RACK' } });
   servidor = spawn(process.execPath, [path.join(__dirname, '..', 'index.js')], {
     env: { ...process.env, PORT: String(PUERTO) },
     stdio: 'ignore'
@@ -171,16 +182,16 @@ test('Fase B: gestión de usuarios y cambio de contraseña obligatorio', async (
 test('Fase B: permisos por rol y autor real en el historial', async () => {
   r = await api('GET', '/productos', undefined, tokens.consulta);
   check('Consulta puede ver', r.status === 200);
-  r = await api('POST', '/productos', { codigo_producto: 'TEST-B-1', descripcion: 'x', categoria: 'TEST', cantidad: 1 }, tokens.consulta);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-B-1', descripcion: 'x', categoria: 'TEST-Cat', cantidad: 1 }, tokens.consulta);
   check('Consulta no puede ingresar → 403', r.status === 403 && r.data.codigo === 'SIN_PERMISO');
-  r = await api('POST', '/productos', { codigo_producto: 'TEST-B-1', descripcion: 'Rol QA', categoria: 'TEST', cantidad: 4, operario: 'Suplantado' }, tokens.op);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-B-1', descripcion: 'Rol QA', categoria: 'TEST-Cat', cantidad: 4, operario: 'Suplantado' }, tokens.op);
   check('Operario puede ingresar', r.status === 201);
   h = await historial('TEST-B-1');
   check('El historial guarda el usuario autenticado, no el enviado', h[0].operario === 'TEST-op' && h[0].usuarioId !== null, h[0].operario);
   p = await producto('TEST-B-1');
   r = await api('DELETE', `/productos/${p.id}`, {}, tokens.op);
   check('Operario no puede eliminar → 403', r.status === 403);
-  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-B-SBO', beneficiario: 'QA', items: [{ codigo_producto: 'TEST-B-1', cantidad_solicitada: 1 }] }, tokens.op);
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-B-SBO', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-B-1', cantidad_solicitada: 1 }] }, tokens.op);
   check('Operario puede crear SBO y queda como autor', r.status === 201 && r.data.creado_por === 'TEST-op');
   check('Operario no ve la acción aprobar', !r.data.acciones.includes('aprobar') && !r.data.acciones.includes('cancelar'));
   const idSbo = r.data.id;
@@ -209,15 +220,15 @@ test('Fase B: CORS y encabezados de seguridad', async () => {
 // ======================= Grupos 1 y 2 (33 verificaciones originales, adaptadas a sesión) =======================
 
 test('Grupo 1: validaciones de entrada', async () => {
-  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-NEG', descripcion: 'x', categoria: 'TEST', cantidad: -5 });
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-NEG', descripcion: 'x', categoria: 'TEST-Cat', cantidad: -5 });
   check('Ingreso con cantidad -5 rechazado', r.status === 400, `${r.status} ${r.data?.error}`);
-  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-0', descripcion: 'x', categoria: 'TEST', cantidad: 0 });
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-0', descripcion: 'x', categoria: 'TEST-Cat', cantidad: 0 });
   check('Ingreso con cantidad 0 rechazado', r.status === 400, r.data?.error);
-  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-X', descripcion: 'x', categoria: 'TEST', cantidad: 'diez' });
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-X', descripcion: 'x', categoria: 'TEST-Cat', cantidad: 'diez' });
   check('Ingreso con cantidad texto → 400', r.status === 400, r.data?.error);
   r = await api('POST', '/productos', { codigo_producto: 'TEST-G-X' });
   check('Ingreso sin campos → 400', r.status === 400, r.data?.error);
-  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-X', descripcion: 'x', categoria: 'TEST', cantidad: 1 }, null);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-X', descripcion: 'x', categoria: 'TEST-Cat', cantidad: 1 }, null);
   check('Ingreso sin sesión → 401', r.status === 401, r.data?.error);
   r = await api('PUT', '/productos/999999', { codigo_estanteria: 'R1' });
   check('Reubicar id inexistente → 404', r.status === 404, r.data?.error);
@@ -235,7 +246,7 @@ test('Grupo 1: validaciones de entrada', async () => {
 });
 
 test('Grupo 1: historial en la misma transacción', async () => {
-  r = await api('POST', '/productos', { codigo_producto: ' TEST-G-001 ', descripcion: 'Cobija QA', categoria: 'TEST', cantidad: 10 }, tokens.op);
+  r = await api('POST', '/productos', { codigo_producto: ' TEST-G-001 ', descripcion: 'Cobija QA', categoria: 'TEST-Cat', cantidad: 10 }, tokens.op);
   check('Ingreso nuevo → 201 (código con espacios se recorta)', r.status === 201 && r.data.producto.codigo_producto === 'TEST-G-001', `${r.status}`);
   p = await producto('TEST-G-001');
   r = await api('PUT', `/productos/${p.id}`, { codigo_estanteria: 'TEST-RACK' }, tokens.op2);
@@ -245,7 +256,7 @@ test('Grupo 1: historial en la misma transacción', async () => {
 });
 
 test('Grupo 2: ingreso adicional suma al stock', async () => {
-  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-001', descripcion: 'otra', categoria: 'TEST', cantidad: 5 }, tokens.op2);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-001', descripcion: 'otra', categoria: 'TEST-Cat', cantidad: 5 }, tokens.op2);
   check('Ingreso de código existente → 200 y suma', r.status === 200 && r.data.adicional && r.data.producto.cantidad === 15, `stock=${r.data?.producto?.cantidad}`);
   check('Conserva la descripción original', r.data.producto.descripcion === 'Cobija QA');
   h = await historial('TEST-G-001');
@@ -253,17 +264,17 @@ test('Grupo 2: ingreso adicional suma al stock', async () => {
 });
 
 test('Grupo 2: reserva de stock al aprobar una SBO', async () => {
-  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-G-SBO1', beneficiario: 'Fundación QA', items: [{ codigo_producto: 'TEST-G-001', cantidad_solicitada: 6 }, { codigo_producto: 'TEST-G-001', cantidad_solicitada: 2 }] });
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-G-SBO1', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-G-001', cantidad_solicitada: 6 }, { codigo_producto: 'TEST-G-001', cantidad_solicitada: 2 }] });
   sbo1 = r.data.id;
   check('SBO1 creada con 2 líneas del mismo producto (6 + 2)', r.status === 201);
   r = await transicion(sbo1, 'aprobar');
   p = await producto('TEST-G-001');
   check('Aprobar reserva 8 unidades', r.status === 200 && p.cantidad === 15 && p.cantidad_reservada === 8, `cantidad=${p.cantidad} reservada=${p.cantidad_reservada}`);
-  r = await api('POST', '/salida', { codigo_producto: 'TEST-G-001', cantidad_retirada: 8, motivo: 'QA' }, tokens.op2);
+  r = await api('POST', '/salida', { codigo_producto: 'TEST-G-001', cantidad_retirada: 8, motivo: 'TEST-Motivo' }, tokens.op2);
   check('Salida manual de 8 (solo hay 7 libres) → 400', r.status === 400, r.data?.error);
-  r = await api('POST', '/salida', { codigo_producto: 'TEST-G-001', cantidad_retirada: 7, motivo: 'QA' }, tokens.op2);
+  r = await api('POST', '/salida', { codigo_producto: 'TEST-G-001', cantidad_retirada: 7, motivo: 'TEST-Motivo' }, tokens.op2);
   check('Salida manual de 7 libres → 200', r.status === 200, `nuevaCantidad=${r.data?.nuevaCantidad}`);
-  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-G-SBO2', beneficiario: 'QA', items: [{ codigo_producto: 'TEST-G-001', cantidad_solicitada: 1 }] });
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-G-SBO2', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-G-001', cantidad_solicitada: 1 }] });
   sbo2 = r.data.id;
   r = await transicion(sbo2, 'aprobar');
   check('Aprobar otra SBO sin stock libre → 400', r.status === 400, r.data?.error);
@@ -289,7 +300,7 @@ test('Grupo 1: cancelar desde ALISTADA libera la reserva', async () => {
 test('Despacho parcial: descuenta lo alistado y libera toda la reserva', async () => {
   r = await transicion(sbo2, 'aprobar');
   check('SBO2 aprobada ahora que hay stock', r.status === 200);
-  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-G-SBO3', beneficiario: 'QA', items: [{ codigo_producto: 'TEST-G-001', cantidad_solicitada: 5 }] });
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-G-SBO3', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-G-001', cantidad_solicitada: 5 }] });
   const sbo3 = r.data.id;
   await transicion(sbo3, 'aprobar');
   p = await producto('TEST-G-001');
@@ -303,7 +314,7 @@ test('Despacho parcial: descuenta lo alistado y libera toda la reserva', async (
 });
 
 test('Concurrencia: dos salidas simultáneas con reserva', async () => {
-  const [a, b] = await Promise.all([1, 2].map(() => api('POST', '/salida', { codigo_producto: 'TEST-G-001', cantidad_retirada: 3, motivo: 'QA concurrente' })));
+  const [a, b] = await Promise.all([1, 2].map(() => api('POST', '/salida', { codigo_producto: 'TEST-G-001', cantidad_retirada: 3, motivo: 'TEST-Motivo' })));
   p = await producto('TEST-G-001');
   check('Solo una de las dos salidas de 3 pasa (libres: 4)', [a.status, b.status].sort().join() === '200,400' && p.cantidad === 2 && p.cantidad_reservada === 1, `${a.status}/${b.status} cantidad=${p.cantidad} reservada=${p.cantidad_reservada}`);
 });
@@ -312,10 +323,115 @@ test('Agotar y eliminar', async () => {
   await transicion(sbo2, 'iniciar', { alistador: 'TEST-op2' });
   await transicion(sbo2, 'finalizar');
   await transicion(sbo2, 'despachar');
-  await api('POST', '/salida', { codigo_producto: 'TEST-G-001', cantidad_retirada: 1, motivo: 'agotar' });
+  await api('POST', '/salida', { codigo_producto: 'TEST-G-001', cantidad_retirada: 1, motivo: 'TEST-Motivo' });
   check('Producto se elimina al llegar a 0 sin reservas', !(await producto('TEST-G-001')));
-  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-002', descripcion: 'Eliminar QA', categoria: 'TEST', cantidad: 4 });
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-002', descripcion: 'Eliminar QA', categoria: 'TEST-Cat', cantidad: 4 });
   r = await api('DELETE', `/productos/${r.data.producto.id}`, {});
   h = await historial('TEST-G-002');
   check('Eliminar sin SBO → 200 y ELIMINACIÓN en historial con unidades', r.status === 200 && h.at(-1).accion === 'ELIMINACIÓN' && h.at(-1).detalles.includes('4 unidades'), h.at(-1)?.detalles);
+});
+
+// ======================= Fase C: catálogos y parámetros =======================
+
+test('Fase C: catálogos (permisos, validación y duplicados)', async () => {
+  r = await api('GET', '/catalogos/categorias', undefined, tokens.consulta);
+  check('Consulta puede leer catálogos', r.status === 200 && r.data.some(c => c.nombre === 'Textiles' && c.prefijo === 'ROP'));
+  r = await api('POST', '/catalogos/categorias', { nombre: 'TEST-Cat2', prefijo: 'TSB' }, tokens.op);
+  check('Operario no administra catálogos → 403', r.status === 403);
+  r = await api('POST', '/catalogos/categorias', { nombre: 'TEST-Cat2', prefijo: 'tsb' }, tokens.coord);
+  check('Coordinador crea categoría y el prefijo queda en mayúsculas', r.status === 201 && r.data.prefijo === 'TSB', r.data?.error);
+  const idCat2 = r.data.id;
+  r = await api('POST', '/catalogos/categorias', { nombre: 'test-cat2' }, tokens.coord);
+  check('Nombre repetido sin importar mayúsculas → 409', r.status === 409, r.data?.error);
+  r = await api('POST', '/catalogos/categorias', { nombre: 'TEST-Cat3', prefijo: 'T1' }, tokens.coord);
+  check('Prefijo con números → 400', r.status === 400, r.data?.error);
+  r = await api('POST', '/catalogos/organizaciones', { nombre: 'TEST-Org2', nit: '900.123.456-7', correo: 'QA@Fundacion.org', telefono: '+57 601 555 1234' }, tokens.coord);
+  check('Organización con NIT y correo normalizados', r.status === 201 && r.data.nit === '900123456-7' && r.data.correo === 'qa@fundacion.org', r.data?.error);
+  r = await api('POST', '/catalogos/organizaciones', { nombre: 'TEST-Org3', nit: 'abc' }, tokens.coord);
+  check('NIT no válido → 400', r.status === 400);
+  r = await api('POST', '/catalogos/motivos', { tipo: 'AJUSTE', nombre: 'TEST-Motivo' }, tokens.coord);
+  check('El mismo nombre de motivo se permite en otro tipo', r.status === 201, r.data?.error);
+  r = await api('PATCH', `/catalogos/motivos/${r.data.id}`, { tipo: 'SALIDA' }, tokens.coord);
+  check('El tipo de un motivo no se puede cambiar', r.status === 400);
+  r = await api('POST', '/catalogos/unidades', { nombre: 'TEST-Bulto', factor: 0 }, tokens.coord);
+  check('Factor de unidad debe ser ≥ 1', r.status === 400);
+  r = await api('POST', '/catalogos/terceros', { tipo: 'AMBOS', nombre: 'TEST-Donante' }, tokens.coord);
+  r = await api('GET', '/catalogos/terceros?tipo=PROVEEDOR', undefined, tokens.consulta);
+  check('Tercero "AMBOS" aparece entre proveedores', r.data.some(t => t.nombre === 'TEST-Donante'));
+  r = await api('GET', '/catalogos/inventados', undefined, tokens.coord);
+  check('Catálogo inexistente → 404', r.status === 404);
+  r = await api('PATCH', `/catalogos/categorias/${idCat2}`, { activo: false }, tokens.coord);
+  check('Desactivar categoría', r.status === 200 && r.data.activo === false);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-C-INA', descripcion: 'x', categoria: 'TEST-Cat2', cantidad: 1 }, tokens.op);
+  check('No se puede ingresar con una categoría inactiva', r.status === 400, r.data?.error);
+  r = await api('GET', '/catalogos/categorias?activos=1', undefined, tokens.op);
+  check('?activos=1 oculta las inactivas', !r.data.some(c => c.nombre === 'TEST-Cat2'));
+});
+
+test('Fase C: ingreso, edición, reubicación y salida con catálogos', async () => {
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-C-1', descripcion: 'Chaqueta QA', categoria: 'Inventada', cantidad: 3 }, tokens.op);
+  check('Categoría fuera del catálogo → 400', r.status === 400 && /categoría/i.test(r.data.error), r.data?.error);
+  const cat = (await api('GET', '/catalogos/categorias')).data.find(c => c.nombre === 'TEST-Cat');
+  r = await api('GET', `/catalogos/categorias/${cat.id}/siguiente-codigo`);
+  check('Código sugerido por prefijo', r.status === 200 && r.data.codigo === 'TST-001', r.data?.codigo);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-C-1', descripcion: 'Chaqueta QA', categoriaId: cat.id, cantidad: 3, talla: 'M', condicion: 'BUENO', grupo: 'Mujer', stock_minimo: 2 }, tokens.op);
+  check('Ingreso con atributos nuevos', r.status === 201 && r.data.producto.categoriaId === cat.id && r.data.producto.categoria === 'TEST-Cat' && r.data.producto.estado === 'Buen estado' && r.data.producto.talla === 'M', r.data?.error);
+  const idC1 = r.data.producto.id;
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-C-2', descripcion: 'x', categoria: 'test-cat', cantidad: 1, condicion: 'ROTO' }, tokens.op);
+  check('Condición no válida → 400', r.status === 400);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-C-2', descripcion: 'x', categoria: 'test-cat', cantidad: 1, ubicacion_general: 'Bodega fantasma' }, tokens.op);
+  check('Ubicación fuera del catálogo → 400', r.status === 400, r.data?.error);
+  r = await api('PATCH', `/productos/${idC1}`, { talla: 'L' }, tokens.op);
+  check('Operario no edita atributos → 403', r.status === 403);
+  r = await api('PATCH', `/productos/${idC1}`, { talla: 'L', stock_minimo: 5, condicion: 'DETERIORO' }, tokens.coord);
+  h = await historial('TEST-C-1');
+  check('Editar atributos deja EDICIÓN con antes → después', r.status === 200 && h.at(-1).accion === 'EDICIÓN' && h.at(-1).detalles.includes('talla: M → L') && h.at(-1).operario === 'TEST-coord', h.at(-1)?.detalles);
+  r = await api('PATCH', `/productos/${idC1}`, { talla: 'L' }, tokens.coord);
+  check('Editar sin cambios → 400', r.status === 400);
+  r = await api('PUT', `/productos/${idC1}`, { codigo_estanteria: 'NO-EXISTE' }, tokens.op);
+  check('Reubicar a ubicación inexistente → 400', r.status === 400);
+  r = await api('PUT', `/productos/${idC1}`, { codigo_estanteria: 'test-rack' }, tokens.op);
+  check('Reubicar usa el código canónico del catálogo', r.status === 200 && r.data.codigo_estanteria === 'TEST-RACK');
+  r = await api('POST', '/salida', { codigo_producto: 'TEST-C-1', cantidad_retirada: 1, motivo: 'Me lo inventé' }, tokens.op);
+  check('Motivo fuera del catálogo → 400', r.status === 400);
+  const motivoAjuste = (await api('GET', '/catalogos/motivos?tipo=AJUSTE')).data.find(m => m.nombre === 'TEST-Motivo');
+  r = await api('POST', '/salida', { codigo_producto: 'TEST-C-1', cantidad_retirada: 1, motivoId: motivoAjuste.id }, tokens.op);
+  check('Un motivo de ajuste no sirve para una salida', r.status === 400);
+  r = await api('POST', '/salida', { codigo_producto: 'TEST-C-1', cantidad_retirada: 1, motivo: 'TEST-Motivo', detalle: 'Fundación QA' }, tokens.op);
+  h = await historial('TEST-C-1');
+  check('Salida con motivo y detalle', r.status === 200 && h.at(-1).detalles === 'Retiro de 1 unidades. Motivo: TEST-Motivo. Detalle: Fundación QA', h.at(-1)?.detalles);
+  r = await api('PATCH', `/productos/${idC1}`, { activo: false }, tokens.coord);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-C-1', descripcion: 'x', categoria: 'TEST-Cat', cantidad: 1 }, tokens.op);
+  check('Producto inactivo no recibe ingresos → 409', r.status === 409);
+});
+
+test('Fase C: SBO con organización y ubicaciones para el Mapa', async () => {
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-C-SBO', beneficiario: 'Fundación inventada', items: [] }, tokens.op);
+  check('Organización fuera del catálogo → 400', r.status === 400, r.data?.error);
+  const org = (await api('GET', '/catalogos/organizaciones')).data.find(o => o.nombre === 'TEST-Org');
+  await api('PATCH', `/productos/${(await producto('TEST-C-1')).id}`, { activo: true }, tokens.coord);
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-C-SBO', organizacionId: org.id, items: [{ codigo_producto: 'TEST-C-1', cantidad_solicitada: 1 }] }, tokens.op);
+  check('SBO enlazada a la organización', r.status === 201 && r.data.organizacionId === org.id && r.data.beneficiario === 'TEST-Org', r.data?.error);
+  r = await api('GET', '/ubicaciones', undefined, tokens.consulta);
+  const rack = r.data.find(u => u.codigo === 'TEST-RACK');
+  check('GET /ubicaciones resume productos y unidades', r.status === 200 && rack.productos === 1 && rack.unidades === 2, JSON.stringify(rack));
+  r = await api('GET', '/ubicaciones/test-rack/contenido', undefined, tokens.consulta);
+  check('Contenido de una ubicación', r.status === 200 && r.data.productos.length === 1 && r.data.productos[0].codigo_producto === 'TEST-C-1' && r.data.unidades === 2);
+  r = await api('GET', '/ubicaciones/NO-EXISTE/contenido', undefined, tokens.consulta);
+  check('Ubicación inexistente → 404', r.status === 404);
+  r = await api('PATCH', `/catalogos/ubicaciones/${rack.id}`, { activo: false }, tokens.coord);
+  check('No se desactiva una ubicación con productos → 409', r.status === 409, r.data?.error);
+});
+
+test('Fase C: parámetros de operación', async () => {
+  r = await api('GET', '/parametros', undefined, tokens.consulta);
+  check('Parámetros con valores por defecto', r.status === 200 && r.data.find(p => p.clave === 'lote_mediano_max').valor === 50);
+  r = await api('PUT', '/parametros', { stock_minimo_defecto: 8 }, tokens.op);
+  check('Operario no cambia parámetros → 403', r.status === 403);
+  r = await api('PUT', '/parametros', { lote_pequeno_max: 80 }, tokens.coord);
+  check('Lote pequeño ≥ mediano → 400', r.status === 400);
+  r = await api('PUT', '/parametros', { inventado: 1 }, tokens.coord);
+  check('Parámetro desconocido → 400', r.status === 400);
+  r = await api('PUT', '/parametros', { stock_minimo_defecto: 8, dias_atraso_sbo: 2 }, tokens.coord);
+  check('Coordinador guarda parámetros', r.status === 200 && r.data.stock_minimo_defecto === 8 && r.data.dias_atraso_sbo === 2);
 });

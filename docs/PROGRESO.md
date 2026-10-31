@@ -13,6 +13,9 @@ Producción: frontend https://smi-frontend-murex.vercel.app · backend https://s
 | 30/10/2026 | Grupos 1 y 2 de pruebas: historial transaccional, validaciones, reserva de stock, bloqueo de eliminación, sesión persistente, manejo de errores | backend `cef8a7a`, frontend `cb8fb4c` |
 | 30/10/2026 | Verificador de consistencia, pruebas en el repositorio y documentación | backend `2d2cae3` |
 | 30/10/2026 | Fase A: interfaz y sistema de diseño | frontend `5f7993a` |
+| 30/10/2026 | Fase B: usuarios, roles y seguridad (migración 1_usuarios_roles aplicada tras respaldo con pg_dump) | backend `1a56f42`, frontend `9b4844f` |
+| 31/10/2026 | Hotfix: el login espera a que el servidor de Render despierte | frontend `88a1bbf` |
+| 31/10/2026 | Fase C: configuración y catálogos (migración 2_catalogos aplicada tras respaldo con pg_dump) | backend y frontend: ver commit "Fase C" |
 
 ## Verificaciones previas (30/10/2026, solo lectura)
 
@@ -41,13 +44,13 @@ Producción: frontend https://smi-frontend-murex.vercel.app · backend https://s
 - Encabezado con usuario, rol y hora; título de pestaña por página; favicon propio; menú colapsable recordado y superpuesto en celular.
 - Backend: las 33 pruebas de integración pasaron a `tests/api.test.js` (`npm test`) + 4 pruebas del verificador; carpetas generadas de skills fuera de git.
 
-## Fase B · Usuarios, roles y seguridad (30/10/2026, sin commit ni despliegue)
+## Fase B · Usuarios, roles y seguridad (30/10/2026, desplegada)
 
 **Base de datos**
 - Migraciones versionadas en `prisma/migrations`:
   - `0_init` es la línea base, idéntica a producción (verificado con `migrate diff`).
   - `1_usuarios_roles` es aditiva: crea el enum `Rol` y las tablas `Usuario` y `SesionRefresh`, y agrega `Historial.usuarioId` opcional.
-- Probadas en el esquema `smi_pruebas` de Supabase. **Producción todavía no tiene la migración aplicada.**
+- Probadas en el esquema `smi_pruebas` de Supabase y aplicadas en producción el 30/10/2026, después del respaldo `respaldos/respaldo-smi-20261030.dump`. Los datos quedaron idénticos antes y después.
 
 **Autenticación** (detalle en `docs/API.md`)
 - Contraseñas con bcrypt (costo 12).
@@ -73,11 +76,37 @@ Producción: frontend https://smi-frontend-murex.vercel.app · backend https://s
 - Frontend: 17 de 17.
 - Navegador: 26 de 26, con roles, cambio obligatorio, gestión de usuarios, renovación automática del token e historial con el usuario real.
 
-**Pendiente de autorización:** respaldo de Supabase, migración en producción, usuarios iniciales, variables en Render, commit y despliegue.
+**Producción:** usuarios iniciales admin, Operario01 y Operario02 creados con contraseña temporal. `JWT_SECRET` está configurado en Render.
+
+## Fase C · Configuración y catálogos (31/10/2026, desplegada)
+
+**Base de datos**
+- Migración `2_catalogos`, aditiva:
+  - Tablas `Categoria`, `Organizacion`, `Tercero`, `Motivo`, `UnidadManejo`, `Ubicacion` y `Parametro`.
+  - Campos opcionales en `Producto`: `categoriaId`, `talla`, `condicion`, `grupo`, `stock_minimo` y `activo`. En `Solicitud`: `organizacionId`.
+  - Valores iniciales: 7 categorías con prefijo, 14 motivos, 5 unidades y la ubicación Recepción.
+- Aplicada en `smi_pruebas` y en producción el 31/10/2026, tras el respaldo `respaldos/respaldo-smi-20261031.dump`.
+- Escala de condición definida por el usuario: Perfecto estado, Buen estado, En deterioro y Dañado. ROP-005 y APP-005 ("Bueno") quedaron en Buen estado; solo se enlazó categoría y condición, con historial EDICIÓN de "sistema".
+- `scripts/migrar-catalogos.js` muestra el mapeo de los textos actuales y lo aplica solo con `--aplicar`.
+
+**API** (detalle en `docs/API.md`)
+- Catálogos con validación, sin duplicados y solo desactivación, nunca borrado.
+- Parámetros de operación.
+- `GET /api/ubicaciones` y `/api/ubicaciones/:codigo/contenido` para el Mapa.
+- Edición de productos con historial EDICIÓN (antes → después).
+- Ingreso, salida, reubicación y SBO validan contra los catálogos.
+
+**Frontend**
+- Configuración con 7 pestañas, con enlace directo `?pestana=`.
+- Ingreso con categoría, código sugerido por prefijo, condición, talla, género o grupo, stock mínimo y ubicación inicial.
+- Salida con motivo del catálogo y detalle opcional.
+- SBO con organización del catálogo.
+- Inventario: condición, reubicación desde la lista de ubicaciones y edición para Coordinador y Administrador.
+
+**Pruebas:** backend 23 de 23 (4 nuevas con unas 40 verificaciones); frontend 17 de 17; navegador 25 de 25.
 
 ## Pendiente (en orden)
 
-- **C** Configuración y catálogos (requiere BD).
 - **D** Mejora de módulos (incluye KPIs en unidades del Dashboard).
 - **E** Novedades y trazabilidad.
 - **F** Indicadores.
