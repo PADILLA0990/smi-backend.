@@ -43,8 +43,9 @@ La matriz está en `auth/permisos.js`. El frontend recibe `permisos[]` y solo lo
 | `inventario:ver` (todas las consultas) | ✔ | ✔ | ✔ | ✔ |
 | `movimientos:registrar` (ingreso, salida) | ✔ | ✔ | ✔ | |
 | `productos:reubicar` | ✔ | ✔ | ✔ | |
-| `productos:eliminar` | ✔ | ✔ | | |
-| `productos:editar` (descripción, categoría, talla, condición, stock mínimo, activo) | ✔ | ✔ | | |
+| `productos:inactivar` (inactivar y activar, con justificación) | ✔ | ✔ | | |
+| `productos:eliminar` (borrado físico, solo productos sin movimientos) | ✔ | | | |
+| `productos:editar` (descripción, categoría, talla, condición, grupo, stock mínimo) | ✔ | ✔ | | |
 | `sbo:crear` (crear, editar ítems) | ✔ | ✔ | ✔ | |
 | `sbo:alistar` (iniciar y finalizar alistamiento) | ✔ | ✔ | ✔ | |
 | `sbo:aprobar` | ✔ | ✔ | | |
@@ -73,18 +74,62 @@ Exigen sesión y permiso. Desde la Fase C, la categoría, la ubicación, el moti
 | Ruta | Permiso |
 |---|---|
 | GET `/productos`, `/historial`, `/solicitudes`, `/solicitudes/:id` | `inventario:ver` |
+| GET `/productos/:id/kardex`, `/historial/filtros` | `inventario:ver` |
 | POST `/productos` (ingreso): `{ codigo_producto, descripcion, cantidad, categoriaId \| categoria, ubicacion_general?, condicion?, talla?, grupo?, stock_minimo? }` | `movimientos:registrar` |
 | POST `/salida`: `{ codigo_producto, cantidad_retirada, motivoId \| motivo, detalle? }` (motivo de tipo SALIDA) | `movimientos:registrar` |
 | PUT `/productos/:id` (reubicar): `{ codigo_estanteria }` con el código de una ubicación del catálogo | `productos:reubicar` |
-| PATCH `/productos/:id` (editar datos, queda EDICIÓN en el historial) | `productos:editar` |
-| DELETE `/productos/:id` | `productos:eliminar` |
+| PATCH `/productos/:id` (editar datos, queda EDICIÓN en el historial; ya no acepta `activo`) | `productos:editar` |
+| POST `/productos/:id/inactivar` y `/productos/:id/activar`: `{ justificacion }` (5 a 200 caracteres) | `productos:inactivar` |
+| DELETE `/productos/:id` (borrado físico) | `productos:eliminar` |
 | POST `/solicitudes`: `{ codigo_sbo, organizacionId \| beneficiario, items, … }` | `sbo:crear` |
 | PUT `/solicitudes/:id/items` | `sbo:crear` |
 | POST `/solicitudes/:id/transicion` | Según la acción: `aprobar` pide `sbo:aprobar`; `iniciar` y `finalizar` piden `sbo:alistar`; `despachar` pide `sbo:despachar`; `cancelar` pide `sbo:cancelar`. |
 
 - `POST /historial` se eliminó: el historial solo lo escribe el backend.
 - `GET /productos` devuelve en `categoria` el nombre vigente del catálogo, además de `categoriaId`, `talla`, `condicion`, `grupo`, `stock_minimo` y `activo`.
-- Un producto inactivo no recibe ingresos (409).
+- Un producto inactivo no recibe ingresos ni se puede incluir en una SBO (409). Sus unidades sí se pueden retirar.
+- Desde la Fase D un producto que llega a 0 unidades **se conserva** (antes se borraba).
+
+### Inventario paginado (Fase D)
+
+`GET /productos?pagina=1` responde `{ datos, total, pagina, porPagina, resumen: { unidades, reservadas, libres } }`. Sin `pagina` devuelve la lista completa, como antes.
+
+| Parámetro | Valores |
+|---|---|
+| `porPagina` | 1 a 100 (20 por defecto) |
+| `q` | Texto en código o descripción |
+| `categoriaId`, `ubicacion` (código), `condicion` (o `SIN`) | Filtros del catálogo |
+| `sinUbicar=1`, `bajoMinimo=1` | Sin estantería asignada; libre por debajo del stock mínimo (propio o el parámetro `stock_minimo_defecto`) |
+| `estado` | `activos` (por defecto), `inactivos` o `todos` |
+| `orden`, `dir` | `codigo_producto`, `descripcion`, `categoria`, `condicion`, `cantidad`, `reservado`, `libre`, `ubicacion`, `ultima_actualizacion`, `fecha_ingreso`; `asc` o `desc` |
+
+Cada producto trae además `libre`, `stock_minimo_efectivo`, `bajo_minimo` y `ultima_actualizacion` (último movimiento o el ingreso).
+
+### Kardex
+
+`GET /productos/:id/kardex` responde `{ producto, movimientos, reservas, saldo_historial, coincide, avisos }`:
+- `movimientos`: el historial del producto en orden cronológico, cada uno con su `saldo` acumulado.
+- `reservas`: SBO en curso que lo incluyen, con `reserva_stock` (falso mientras la SBO está CREADA).
+- `coincide`: si el saldo según el historial es igual al stock guardado.
+
+### Borrado físico
+
+Solo el Administrador, y solo si el producto no tiene movimientos aparte de su ingreso inicial, ediciones o cambios de estado, nunca estuvo en una SBO y no tiene reservas. En cualquier otro caso responde 409 y se debe inactivar.
+
+### Historial paginado (Fase D)
+
+`GET /historial?pagina=1` responde `{ datos, total, pagina, porPagina }`, del más reciente al más antiguo. Sin `pagina` devuelve todo, como antes.
+
+| Parámetro | Valores |
+|---|---|
+| `porPagina` | 1 a 100 (25 por defecto) |
+| `desde`, `hasta` | `AAAA-MM-DD`, días de Bogotá (ambos incluidos) |
+| `codigo` | Parte del código |
+| `accion`, `operario` | Valor exacto (los existentes salen de `GET /historial/filtros`) |
+| `sbo` | Código de SBO: sus eventos y sus despachos |
+| `q` | Texto en código, acción, operario o detalle |
+
+Cada registro trae `sbo` (la SBO relacionada o `null`) y `es_sbo` (si el registro es un evento de SBO y no de un producto).
 
 ## Catálogos (Fase C)
 

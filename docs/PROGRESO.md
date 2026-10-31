@@ -15,7 +15,8 @@ Producción: frontend https://smi-frontend-murex.vercel.app · backend https://s
 | 30/10/2026 | Fase A: interfaz y sistema de diseño | frontend `5f7993a` |
 | 30/10/2026 | Fase B: usuarios, roles y seguridad (migración 1_usuarios_roles aplicada tras respaldo con pg_dump) | backend `1a56f42`, frontend `9b4844f` |
 | 31/10/2026 | Hotfix: el login espera a que el servidor de Render despierte | frontend `88a1bbf` |
-| 31/10/2026 | Fase C: configuración y catálogos (migración 2_catalogos aplicada tras respaldo con pg_dump) | backend y frontend: ver commit "Fase C" |
+| 31/10/2026 | Fase C: configuración y catálogos (migración 2_catalogos aplicada tras respaldo con pg_dump) | backend `f3ab88d`, frontend `a3a5951` |
+| 31/10/2026 | Fase D1: inventario e historial (filtros, paginación, kardex, inactivar) | ver commit "Fase D1" |
 
 ## Verificaciones previas (30/10/2026, solo lectura)
 
@@ -105,9 +106,31 @@ Producción: frontend https://smi-frontend-murex.vercel.app · backend https://s
 
 **Pruebas:** backend 23 de 23 (4 nuevas con unas 40 verificaciones); frontend 17 de 17; navegador 25 de 25.
 
+## Fase D1 · Inventario e historial (31/10/2026, desplegada)
+
+Sin cambios en la base de datos.
+
+**Decisiones del usuario:** los productos que llegan a 0 unidades se conservan; dividir un producto entre ubicaciones queda para después de la Fase G; la exportación a Excel está pendiente de confirmar si se necesita.
+
+**API** (detalle en `docs/API.md`)
+- `GET /productos?pagina=`: búsqueda, filtros (categoría, ubicación, condición, sin ubicar, bajo stock mínimo, activos/inactivos), orden y paginación, con Total / Reservado / Libre y última actualización.
+- `GET /productos/:id/kardex`: movimientos con saldo acumulado, SBO en curso y aviso si el historial no coincide con el stock.
+- Inactivar y activar con justificación (`productos:inactivar`, Coordinador y Administrador). El borrado físico es solo del Administrador y solo para productos sin movimientos.
+- `GET /historial?pagina=`: filtros por fecha, código, acción, operario, SBO y texto. `GET /historial/filtros`.
+- Un producto inactivo no entra en SBO nuevas.
+- El verificador de consistencia reconoce EDICIÓN, INACTIVACIÓN y ACTIVACIÓN, los productos agotados que se conservan y la zona de cada ubicación.
+
+**Frontend**
+- Inventario con filtros, resumen de unidades, paginación en el servidor, detalle con kardex e inactivar/activar.
+- Historial con filtros en la URL y enlaces al producto y a la SBO.
+
+**Pruebas:** backend 29 de 29 (22 de integración, 7 unitarias); frontend 18 de 18; navegador 25 de 25.
+
 ## Pendiente (en orden)
 
-- **D** Mejora de módulos (incluye KPIs en unidades del Dashboard).
+- **D2** Ingresos y retiros como documentos (migración `3_documentos`).
+- **D3** Solicitudes SBO.
+- **D4** Dashboard.
 - **E** Novedades y trazabilidad.
 - **F** Indicadores.
 - **G** Conciliación (requiere BD).

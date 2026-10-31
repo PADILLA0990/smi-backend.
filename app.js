@@ -3,13 +3,13 @@ const cors = require('cors');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const config = require('./lib/config');
-const prisma = require('./lib/prisma');
 const { manejarError } = require('./lib/errores');
-const { autenticar, autorizar } = require('./auth/middleware');
+const { autenticar } = require('./auth/middleware');
 const authRoutes = require('./auth/routes');
 const usuariosRoutes = require('./usuarios/routes');
 const productosRoutes = require('./productos/routes');
 const solicitudesRoutes = require('./solicitudes/routes');
+const historialRoutes = require('./historial/routes');
 const { router: catalogosRoutes } = require('./catalogos/routes');
 
 const app = express();
@@ -42,15 +42,8 @@ app.use('/api/usuarios', usuariosRoutes);
 // Cada operación registra su propio historial en la misma transacción.
 app.use('/api', productosRoutes);
 
-// Historial (solo lectura: ya no se puede escribir directamente desde el navegador)
-app.get('/api/historial', autorizar('inventario:ver'), async (req, res) => {
-  try {
-    const registros = await prisma.historial.findMany({ orderBy: { fecha: 'desc' } });
-    res.json(registros);
-  } catch (error) {
-    manejarError(res, error, 'Error al obtener los registros');
-  }
-});
+// Historial (solo lectura, con filtros y paginación)
+app.use('/api', historialRoutes);
 
 app.use('/api/solicitudes', solicitudesRoutes);
 

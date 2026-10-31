@@ -7,17 +7,12 @@ const {
   CATALOGOS, CONDICIONES, GRUPOS, TIPOS_TERCERO, TIPOS_MOTIVO, PARAMETROS,
   validarCampos, verificarUnicos, leerParametros, validarParametros
 } = require('../lib/catalogos');
+// Un producto está en la ubicación de su estantería o, si no tiene, en su ubicación general (p. ej. Recepción)
+const { enUbicacion } = require('../lib/inventario');
 
 const router = express.Router();
 const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
 
-// Un producto está en la ubicación de su estantería o, si no tiene, en su ubicación general (p. ej. Recepción)
-const enUbicacion = (codigo) => ({
-  OR: [
-    { codigo_estanteria: { equals: codigo, mode: 'insensitive' } },
-    { codigo_estanteria: null, ubicacion_general: { equals: codigo, mode: 'insensitive' } }
-  ]
-});
 
 const definicion = (req, res) => {
   const def = CATALOGOS[req.params.catalogo];

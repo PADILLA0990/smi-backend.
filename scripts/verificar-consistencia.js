@@ -12,38 +12,42 @@
 // Sale con código 1 si encuentra diferencias.
 
 const ESTADOS_CON_RESERVA = ['APROBADA', 'EN_ALISTAMIENTO', 'ALISTADA'];
+// Acciones que no mueven stock ni ubicación
+const SIN_EFECTO = ['EDICIÓN', 'INACTIVACIÓN', 'ACTIVACIÓN'];
 
 const numero = (texto, regex) => {
   const m = texto && texto.match(regex);
   return m ? Number(m[1]) : null;
 };
 
-// Aplica cada movimiento del historial, en orden cronológico, y devuelve el estado esperado por código
-function recalcular(historial) {
+// Aplica cada movimiento del historial, en orden cronológico, y devuelve el estado esperado por código.
+// Cada movimiento queda con el saldo resultante (lo usa el kardex).
+// zonas: { codigo de ubicación en minúsculas: zona } del catálogo; al reubicar, ubicacion_general = zona o "Almacenamiento".
+function recalcular(historial, zonas = {}) {
   const esperado = {};
   const ordenado = [...historial].sort((a, b) => new Date(a.fecha) - new Date(b.fecha) || a.id - b.id);
 
   for (const mov of ordenado) {
     const codigo = mov.codigo_producto;
     const p = esperado[codigo] || (esperado[codigo] = {
-      existe: false, cantidad: 0, ubicacion_general: null, codigo_estanteria: null, movimientos: [], avisos: []
+      existe: false, agotado: false, cantidad: 0, ubicacion_general: null, codigo_estanteria: null, movimientos: [], avisos: []
     });
-    p.movimientos.push(mov);
     const d = mov.detalles || '';
 
     switch (mov.accion) {
       case 'INGRESO NUEVO': {
         const n = numero(d, /cantidad:\s*(\d+)/i);
         if (n === null) { p.avisos.push(`#${mov.id} INGRESO NUEVO sin cantidad legible`); break; }
-        if (p.existe) p.avisos.push(`#${mov.id} INGRESO NUEVO sobre un producto que ya existía`);
-        Object.assign(p, { existe: true, cantidad: n, ubicacion_general: 'Recepción', codigo_estanteria: null });
+        if (p.existe && !p.agotado) p.avisos.push(`#${mov.id} INGRESO NUEVO sobre un producto que ya existía`);
+        Object.assign(p, { existe: true, agotado: false, cantidad: n, ubicacion_general: 'Recepción', codigo_estanteria: null });
         break;
       }
       case 'INGRESO ADICIONAL': {
         const n = numero(d, /cantidad:\s*(\d+)/i);
         if (n === null) { p.avisos.push(`#${mov.id} INGRESO ADICIONAL sin cantidad legible`); break; }
-        if (!p.existe) p.avisos.push(`#${mov.id} INGRESO ADICIONAL sobre un producto que no existía`);
+        if (!p.existe && !p.agotado) p.avisos.push(`#${mov.id} INGRESO ADICIONAL sobre un producto que no existía`);
         p.existe = true;
+        p.agotado = false;
         p.cantidad += n;
         break;
       }
@@ -54,25 +58,28 @@ function recalcular(historial) {
         if (!p.existe) p.avisos.push(`#${mov.id} ${mov.accion} sobre un producto que no existía`);
         p.cantidad -= n;
         if (p.cantidad < 0) p.avisos.push(`#${mov.id} el saldo queda negativo (${p.cantidad})`);
-        // El sistema elimina el producto cuando llega a 0
-        if (p.cantidad <= 0) p.existe = false;
+        // Antes de la Fase D el producto se eliminaba al llegar a 0; desde entonces se conserva con 0.
+        // "agotado" acepta los dos casos.
+        if (p.cantidad <= 0) { p.existe = false; p.agotado = true; }
         break;
       }
       case 'REUBICACIÓN': {
         const destino = (d.match(/Movido a:\s*(.+)$/i) || [])[1];
         if (!p.existe) p.avisos.push(`#${mov.id} REUBICACIÓN sobre un producto que no existía`);
-        p.ubicacion_general = 'Almacenamiento';
         p.codigo_estanteria = destino ? destino.trim() : null;
+        p.ubicacion_general = zonas[(p.codigo_estanteria || '').toLowerCase()] || 'Almacenamiento';
         break;
       }
       case 'ELIMINACIÓN':
         p.existe = false;
+        p.agotado = false;
         p.cantidad = 0;
         break;
       default:
         // Eventos SBO (CREADA, APROBADA, ...) no mueven stock: la reserva se valida con las solicitudes
-        if (!mov.accion.startsWith('SBO ')) p.avisos.push(`#${mov.id} acción desconocida "${mov.accion}"`);
+        if (!mov.accion.startsWith('SBO ') && !SIN_EFECTO.includes(mov.accion)) p.avisos.push(`#${mov.id} acción desconocida "${mov.accion}"`);
     }
+    p.movimientos.push({ ...mov, saldo: p.cantidad });
   }
   return esperado;
 }
@@ -90,8 +97,12 @@ function reservasEsperadas(solicitudes) {
 }
 
 // Compara lo recalculado con lo guardado. Devuelve una lista de diferencias por producto.
-function compararConsistencia({ productos, historial, solicitudes = [] }) {
-  const esperado = recalcular(historial);
+// Mapa de zonas por código de ubicación, para recalcular()
+const zonasDe = (ubicaciones = []) =>
+  Object.fromEntries(ubicaciones.filter(u => u.zona).map(u => [u.codigo.toLowerCase(), u.zona]));
+
+function compararConsistencia({ productos, historial, solicitudes = [], ubicaciones = [] }) {
+  const esperado = recalcular(historial, zonasDe(ubicaciones));
   const reservas = reservasEsperadas(solicitudes);
   const guardados = Object.fromEntries(productos.map(p => [p.codigo_producto, p]));
   const codigos = [...new Set([...Object.keys(esperado), ...Object.keys(guardados)])].sort();
@@ -106,7 +117,7 @@ function compararConsistencia({ productos, historial, solicitudes = [] }) {
       diferencias.push({ campo: 'historial', esperado: 'con movimientos', guardado: 'sin ningún movimiento' });
     } else if (e.existe && !g) {
       diferencias.push({ campo: 'existencia', esperado: `existe con ${e.cantidad}`, guardado: 'no existe' });
-    } else if (!e.existe && g) {
+    } else if (!e.existe && g && !(e.agotado && g.cantidad === 0)) {
       diferencias.push({ campo: 'existencia', esperado: 'no existe (eliminado o agotado)', guardado: `existe con ${g.cantidad}` });
     } else if (e.existe && g) {
       if (e.cantidad !== g.cantidad) diferencias.push({ campo: 'cantidad', esperado: e.cantidad, guardado: g.cantidad });
@@ -131,23 +142,24 @@ async function leerPorApi(base) {
     if (!r.ok) throw new Error(`GET ${ruta} respondió ${r.status}`);
     return r.json();
   };
-  const [productos, historial, lista] = await Promise.all([get('/productos'), get('/historial'), get('/solicitudes')]);
+  const [productos, historial, lista, ubicaciones] = await Promise.all([get('/productos'), get('/historial'), get('/solicitudes'), get('/ubicaciones?todas=1')]);
   // Las solicitudes con reserva se piden con detalle para tener sus ítems
   const solicitudes = await Promise.all(lista.map(s =>
     ESTADOS_CON_RESERVA.includes(s.estado) && !s.items ? get(`/solicitudes/${s.id}`) : s));
-  return { productos, historial, solicitudes };
+  return { productos, historial, solicitudes, ubicaciones };
 }
 
 async function leerPorPrisma() {
   require('dotenv').config();
   const prisma = require('../lib/prisma');
   try {
-    const [productos, historial, solicitudes] = await Promise.all([
+    const [productos, historial, solicitudes, ubicaciones] = await Promise.all([
       prisma.producto.findMany(),
       prisma.historial.findMany(),
-      prisma.solicitud.findMany({ include: { items: true } })
+      prisma.solicitud.findMany({ include: { items: true } }),
+      prisma.ubicacion.findMany()
     ]);
-    return { productos, historial, solicitudes };
+    return { productos, historial, solicitudes, ubicaciones };
   } finally {
     await prisma.$disconnect();
   }
@@ -184,4 +196,4 @@ if (require.main === module) {
   main().catch(err => { console.error('Error:', err.message); process.exitCode = 2; });
 }
 
-module.exports = { recalcular, reservasEsperadas, compararConsistencia };
+module.exports = { recalcular, reservasEsperadas, compararConsistencia, zonasDe };

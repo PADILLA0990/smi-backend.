@@ -5,6 +5,7 @@ const { manejarError, esEnteroPositivo, campoFaltante } = require('../lib/errore
 const { registrarHistorial } = require('../lib/historial');
 const { autorizar } = require('../auth/middleware');
 const { CONDICIONES, GRUPOS, resolverActivo } = require('../lib/catalogos');
+const { listarProductos, kardexProducto, ESTADOS_SBO_ACTIVOS } = require('../lib/inventario');
 
 const router = express.Router();
 
@@ -43,8 +44,24 @@ const resolverUbicacion = (tx, codigo) =>
 
 const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
 
-// Solicitudes que todavía pueden mover stock de un producto
-const ESTADOS_SBO_ACTIVOS = ['CREADA', 'APROBADA', 'EN_ALISTAMIENTO', 'ALISTADA'];
+// Acciones del historial que no mueven stock: un producto que solo tiene estas (y su ingreso inicial)
+// se considera "sin movimientos" y el Administrador puede borrarlo físicamente
+const ACCIONES_SIN_MOVIMIENTO = ['INGRESO NUEVO', 'EDICIÓN', 'INACTIVACIÓN', 'ACTIVACIÓN'];
+
+// Justificación obligatoria para inactivar o activar (texto libre: explica el caso, no clasifica)
+function leerJustificacion(body) {
+  const justificacion = typeof body?.justificacion === 'string' ? body.justificacion.trim() : '';
+  if (justificacion.length < 5 || justificacion.length > 200) {
+    throw new StockError(400, 'La justificación es obligatoria (entre 5 y 200 caracteres).');
+  }
+  return justificacion;
+}
+
+// SBO en curso que incluyen el producto
+const sboActivasDe = (tx, codigo_producto) => tx.solicitud.findMany({
+  where: { estado: { in: ESTADOS_SBO_ACTIVOS }, items: { some: { codigo_producto } } },
+  select: { codigo_sbo: true }
+});
 
 // Cada acción sobre el inventario guarda su auditoría en la misma transacción:
 // o quedan registrados ambos (movimiento + historial) o ninguno.
@@ -59,9 +76,12 @@ const idValido = (req, res) => {
   return id;
 };
 
-// Obtener el inventario de productos
+// Obtener el inventario de productos.
+// Con ?pagina= responde { datos, total, pagina, porPagina, resumen } con filtros y orden (lib/inventario.js);
+// sin ella devuelve la lista completa, como antes (la usan los formularios y el verificador).
 router.get('/productos', autorizar('inventario:ver'), async (req, res) => {
   try {
+    if (req.query.pagina !== undefined) return res.json(await listarProductos(prisma, req.query));
     const productos = await prisma.producto.findMany({
       orderBy: { fecha_ingreso: 'desc' },
       include: { categoriaRef: { select: { nombre: true, prefijo: true } } }
@@ -157,7 +177,68 @@ router.put('/productos/:id', autorizar('productos:reubicar'), async (req, res) =
   }
 });
 
-// Eliminar un producto del inventario (bloqueado si tiene Solicitudes SBO en curso)
+// Kardex: movimientos con saldo acumulado y SBO en las que está el producto
+router.get('/productos/:id/kardex', autorizar('inventario:ver'), async (req, res) => {
+  try {
+    const id = idValido(req, res);
+    if (id === null) return;
+    res.json(await kardexProducto(prisma, id));
+  } catch (error) {
+    manejarError(res, error, 'Error al consultar el kardex');
+  }
+});
+
+// Inactivar (borrado lógico): el producto deja de recibir ingresos y de aparecer en SBO nuevas.
+// Conserva su stock y su historial; las unidades que queden se pueden retirar.
+router.post('/productos/:id/inactivar', autorizar('productos:inactivar'), async (req, res) => {
+  try {
+    const id = idValido(req, res);
+    if (id === null) return;
+    const justificacion = leerJustificacion(req.body);
+
+    const producto = await prisma.$transaction(async (tx) => {
+      const actual = await tx.producto.findUnique({ where: { id } });
+      if (!actual) throw new StockError(404, 'El producto no existe.');
+      if (!actual.activo) throw new StockError(400, `${actual.codigo_producto} ya está inactivo.`);
+      const pendientes = await sboActivasDe(tx, actual.codigo_producto);
+      if (pendientes.length > 0) {
+        throw new StockError(409, `No se puede inactivar: el producto está en Solicitudes SBO en curso (${pendientes.map(s => s.codigo_sbo).join(', ')}). Cancélelas o despáchelas primero.`);
+      }
+      const actualizado = await tx.producto.update({ where: { id }, data: { activo: false } });
+      await registrarHistorial(tx, actual.codigo_producto, 'INACTIVACIÓN', req.usuario,
+        `Justificación: ${justificacion} (tenía ${actual.cantidad} unidades)`);
+      return actualizado;
+    }, OPCIONES_TX);
+
+    res.json(producto);
+  } catch (error) {
+    manejarError(res, error, 'Error al inactivar el producto');
+  }
+});
+
+router.post('/productos/:id/activar', autorizar('productos:inactivar'), async (req, res) => {
+  try {
+    const id = idValido(req, res);
+    if (id === null) return;
+    const justificacion = leerJustificacion(req.body);
+
+    const producto = await prisma.$transaction(async (tx) => {
+      const actual = await tx.producto.findUnique({ where: { id } });
+      if (!actual) throw new StockError(404, 'El producto no existe.');
+      if (actual.activo) throw new StockError(400, `${actual.codigo_producto} ya está activo.`);
+      const actualizado = await tx.producto.update({ where: { id }, data: { activo: true } });
+      await registrarHistorial(tx, actual.codigo_producto, 'ACTIVACIÓN', req.usuario, `Justificación: ${justificacion}`);
+      return actualizado;
+    }, OPCIONES_TX);
+
+    res.json(producto);
+  } catch (error) {
+    manejarError(res, error, 'Error al activar el producto');
+  }
+});
+
+// Borrado físico: solo el Administrador y solo si el producto no tiene movimientos
+// (registrado por error). Lo normal es inactivarlo.
 router.delete('/productos/:id', autorizar('productos:eliminar'), async (req, res) => {
   try {
     const id = idValido(req, res);
@@ -169,17 +250,17 @@ router.delete('/productos/:id', autorizar('productos:eliminar'), async (req, res
         throw new StockError(404, 'El producto no existe.');
       }
 
-      const pendientes = await tx.solicitud.findMany({
-        where: { estado: { in: ESTADOS_SBO_ACTIVOS }, items: { some: { codigo_producto: producto.codigo_producto } } },
-        select: { codigo_sbo: true }
-      });
-      if (pendientes.length > 0) {
-        throw new StockError(409, `No se puede eliminar: el producto está en Solicitudes SBO en curso (${pendientes.map(s => s.codigo_sbo).join(', ')}). Cancélelas o despáchelas primero.`);
+      const [movimientos, enSolicitudes] = await Promise.all([
+        tx.historial.count({ where: { codigo_producto: producto.codigo_producto, accion: { notIn: ACCIONES_SIN_MOVIMIENTO } } }),
+        tx.solicitudItem.count({ where: { codigo_producto: producto.codigo_producto } })
+      ]);
+      if (movimientos > 0 || enSolicitudes > 0 || producto.cantidad_reservada > 0) {
+        throw new StockError(409, `No se puede borrar ${producto.codigo_producto}: ya tiene movimientos${enSolicitudes > 0 ? ' o Solicitudes SBO' : ''}. Inactívelo en su lugar.`);
       }
 
       await tx.producto.delete({ where: { id } });
       await registrarHistorial(tx, producto.codigo_producto, 'ELIMINACIÓN', req.usuario,
-        `Artículo retirado del sistema (tenía ${producto.cantidad} unidades)`);
+        `Producto registrado por error, borrado del sistema (tenía ${producto.cantidad} unidades)`);
     }, OPCIONES_TX);
 
     res.json({ message: 'Producto eliminado correctamente' });
@@ -191,7 +272,7 @@ router.delete('/productos/:id', autorizar('productos:eliminar'), async (req, res
 // Editar datos descriptivos del producto (no cambia stock ni ubicación)
 const ETIQUETAS_EDICION = {
   descripcion: 'descripción', categoria: 'categoría', talla: 'talla', condicion: 'condición',
-  grupo: 'grupo', stock_minimo: 'stock mínimo', activo: 'activo'
+  grupo: 'grupo', stock_minimo: 'stock mínimo'
 };
 
 router.patch('/productos/:id', autorizar('productos:editar'), async (req, res) => {
@@ -206,8 +287,7 @@ router.patch('/productos/:id', autorizar('productos:editar'), async (req, res) =
       data.descripcion = descripcion;
     }
     if ('activo' in body) {
-      if (typeof body.activo !== 'boolean') return res.status(400).json({ error: 'El campo "activo" debe ser verdadero o falso.' });
-      data.activo = body.activo;
+      return res.status(400).json({ error: 'Para inactivar o activar un producto use la acción correspondiente (pide una justificación).' });
     }
 
     const producto = await prisma.$transaction(async (tx) => {
@@ -223,7 +303,7 @@ router.patch('/productos/:id', autorizar('productos:editar'), async (req, res) =
       const cambios = Object.keys(ETIQUETAS_EDICION).filter(c => c in data && data[c] !== actual[c]);
       if (cambios.length === 0) throw new StockError(400, 'No hay cambios para guardar.');
       const actualizado = await tx.producto.update({ where: { id }, data });
-      const mostrar = (c, v) => (v === null || v === undefined ? 'vacío' : c === 'condicion' ? CONDICIONES[v] : c === 'activo' ? (v ? 'sí' : 'no') : v);
+      const mostrar = (c, v) => (v === null || v === undefined ? 'vacío' : c === 'condicion' ? CONDICIONES[v] : v);
       await registrarHistorial(tx, actual.codigo_producto, 'EDICIÓN', req.usuario,
         cambios.map(c => `${ETIQUETAS_EDICION[c]}: ${mostrar(c, actual[c])} → ${mostrar(c, data[c])}`).join('; '));
       return actualizado;

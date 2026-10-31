@@ -51,3 +51,43 @@ test('Producto guardado sin movimientos se reporta', () => {
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.diferencias[0].campo, 'historial');
 });
+
+test('Fase D: producto agotado que se conserva con 0 unidades es consistente y luego puede reingresar', () => {
+  const historial = [
+    mov(1, 'D', 'INGRESO NUEVO', 'Ingresó cantidad: 4'),
+    mov(2, 'D', 'SALIDA/RETIRO', 'Retiro de 4 unidades. Motivo: X'),
+    mov(3, 'E', 'INGRESO NUEVO', 'Ingresó cantidad: 2'),
+    mov(4, 'E', 'SALIDA/RETIRO', 'Retiro de 2 unidades. Motivo: X'),
+    mov(5, 'E', 'INGRESO ADICIONAL', 'Ingresó cantidad: 7. Stock total: 7')
+  ];
+  const productos = [
+    { codigo_producto: 'D', cantidad: 0, cantidad_reservada: 0, ubicacion_general: 'Recepción', codigo_estanteria: null },
+    { codigo_producto: 'E', cantidad: 7, cantidad_reservada: 0, ubicacion_general: 'Recepción', codigo_estanteria: null }
+  ];
+  const res = compararConsistencia({ productos, historial });
+  assert.ok(res.every(r => r.ok && r.avisos.length === 0), JSON.stringify(res.map(r => [r.diferencias, r.avisos])));
+});
+
+test('Fase D: edición, inactivación y activación no mueven stock ni generan avisos', () => {
+  const historial = [
+    mov(1, 'F', 'INGRESO NUEVO', 'Ingresó cantidad: 3'),
+    mov(2, 'F', 'EDICIÓN', 'talla: vacío → M'),
+    mov(3, 'F', 'INACTIVACIÓN', 'Justificación: descontinuado'),
+    mov(4, 'F', 'ACTIVACIÓN', 'Justificación: vuelve a recibirse')
+  ];
+  const productos = [{ codigo_producto: 'F', cantidad: 3, cantidad_reservada: 0, ubicacion_general: 'Recepción', codigo_estanteria: null }];
+  const [r] = compararConsistencia({ productos, historial });
+  assert.ok(r.ok && r.avisos.length === 0, JSON.stringify([r.diferencias, r.avisos]));
+});
+
+test('Fase D: la reubicación espera la zona del catálogo y cada movimiento lleva su saldo', () => {
+  const historial = [
+    mov(1, 'G', 'INGRESO NUEVO', 'Ingresó cantidad: 10'),
+    mov(2, 'G', 'SALIDA/RETIRO', 'Retiro de 3 unidades. Motivo: X'),
+    mov(3, 'G', 'REUBICACIÓN', 'Movido a: B-01')
+  ];
+  const productos = [{ codigo_producto: 'G', cantidad: 7, cantidad_reservada: 0, ubicacion_general: 'Bodega B', codigo_estanteria: 'B-01' }];
+  const [r] = compararConsistencia({ productos, historial, ubicaciones: [{ codigo: 'B-01', zona: 'Bodega B' }] });
+  assert.ok(r.ok, JSON.stringify(r.diferencias));
+  assert.deepStrictEqual(r.movimientos.map(m => m.saldo), [10, 7, 7]);
+});

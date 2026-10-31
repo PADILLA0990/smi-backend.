@@ -13,16 +13,18 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - `npm run verificar [-- --api <URL>]`: consistencia historial ↔ stock, solo lectura.
 
 ## Estructura
-- `index.js`: solo arranca el servidor. `app.js`: middlewares (helmet, CORS, cookies), rutas, historial y manejo de errores.
+- `index.js`: solo arranca el servidor. `app.js`: middlewares (helmet, CORS, cookies), rutas y manejo de errores.
 - `lib/config.js`: variables de entorno con valores por defecto.
 - `auth/`: login, refresh, logout y cambio de contraseña (`routes.js`), `autenticar` y `autorizar` (`middleware.js`), matriz de permisos (`permisos.js`), bcrypt y JWT (`credenciales.js`).
 - `usuarios/routes.js`: gestión de usuarios (Administrador).
 - `catalogos/routes.js`: catálogos, parámetros y ubicaciones (`/api/ubicaciones`, para el Mapa).
 - `lib/catalogos.js`: definición y validación de catálogos, `resolverActivo` (busca por id o nombre) y parámetros con sus valores por defecto.
 - `lib/historial.js`: `registrarHistorial(tx, codigo, accion, req.usuario, detalles)`. El autor siempre sale de la sesión.
-- `productos/routes.js`: productos, ingreso, salida, reubicar y eliminar.
+- `productos/routes.js`: productos, ingreso, salida, reubicar, editar, kardex, inactivar/activar y borrado físico (solo Administrador, sin movimientos).
+- `lib/inventario.js`: lista paginada con filtros y orden, y kardex (reutiliza `recalcular` del verificador).
+- `historial/routes.js`: historial con filtros y paginación (`?pagina=`); sin `pagina` devuelve todo.
 - `solicitudes/`: SBO (`estados.js` es la máquina de estados).
-- `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`.
+- `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`. Un producto agotado se conserva con 0 unidades.
 - `lib/errores.js`: errores con status y mensajes en español.
 - `scripts/verificar-consistencia.js`: lógica pura reutilizable para Conciliación.
 - `scripts/migrar-catalogos.js`: pasa los textos libres a los catálogos (solo muestra; aplica con `--aplicar`).

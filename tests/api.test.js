@@ -206,7 +206,13 @@ test('Fase B: permisos por rol y autor real en el historial', async () => {
   r = await transicion(idSbo, 'cancelar');
   p = await producto('TEST-B-1');
   r = await api('DELETE', `/productos/${p.id}`, {}, tokens.coord);
-  check('Coordinador puede eliminar', r.status === 200);
+  check('Fase D: Coordinador ya no borra físicamente → 403', r.status === 403);
+  r = await api('DELETE', `/productos/${p.id}`, {}, tokens.admin);
+  check('Fase D: ni el Administrador borra un producto que estuvo en una SBO → 409', r.status === 409, r.data?.error);
+  r = await api('POST', `/productos/${p.id}/inactivar`, { justificacion: 'Prueba de roles' }, tokens.op);
+  check('Fase D: Operario no inactiva → 403', r.status === 403);
+  r = await api('POST', `/productos/${p.id}/inactivar`, { justificacion: 'Prueba de roles' }, tokens.coord);
+  check('Fase D: Coordinador inactiva con justificación', r.status === 200 && r.data.activo === false, r.data?.error);
 });
 
 test('Fase B: CORS y encabezados de seguridad', async () => {
@@ -234,7 +240,7 @@ test('Grupo 1: validaciones de entrada', async () => {
   check('Reubicar id inexistente → 404', r.status === 404, r.data?.error);
   r = await api('PUT', '/productos/abc', { codigo_estanteria: 'R1' });
   check('Reubicar id no numérico → 404', r.status === 404, r.data?.error);
-  r = await api('DELETE', '/productos/999999', {});
+  r = await api('DELETE', '/productos/999999', {}, tokens.admin);
   check('Eliminar id inexistente → 404', r.status === 404, r.data?.error);
   r = await api('PUT', '/productos/1', {});
   check('Reubicar sin estantería → 400', r.status === 400, r.data?.error);
@@ -280,12 +286,12 @@ test('Grupo 2: reserva de stock al aprobar una SBO', async () => {
   check('Aprobar otra SBO sin stock libre → 400', r.status === 400, r.data?.error);
 });
 
-test('Grupo 2: eliminar con SBO en curso', async () => {
+test('Grupo 2: inactivar con SBO en curso', async () => {
   p = await producto('TEST-G-001');
-  r = await api('DELETE', `/productos/${p.id}`, {});
-  check('Eliminar producto con SBO en curso → 409', r.status === 409, r.data?.error);
-  r = await api('DELETE', `/productos/${p.id}`, {}, tokens.op);
-  check('Eliminar sin permiso → 403', r.status === 403, r.data?.error);
+  r = await api('POST', `/productos/${p.id}/inactivar`, { justificacion: 'No debería pasar' });
+  check('Inactivar producto con SBO en curso → 409', r.status === 409, r.data?.error);
+  r = await api('POST', `/productos/${p.id}/inactivar`, { justificacion: 'No debería pasar' }, tokens.op);
+  check('Inactivar sin permiso → 403', r.status === 403, r.data?.error);
 });
 
 test('Grupo 1: cancelar desde ALISTADA libera la reserva', async () => {
@@ -324,11 +330,20 @@ test('Agotar y eliminar', async () => {
   await transicion(sbo2, 'finalizar');
   await transicion(sbo2, 'despachar');
   await api('POST', '/salida', { codigo_producto: 'TEST-G-001', cantidad_retirada: 1, motivo: 'TEST-Motivo' });
-  check('Producto se elimina al llegar a 0 sin reservas', !(await producto('TEST-G-001')));
+  p = await producto('TEST-G-001');
+  check('Fase D: el producto agotado se conserva con 0 unidades', p && p.cantidad === 0 && p.cantidad_reservada === 0, JSON.stringify(p));
+  r = await api('DELETE', `/productos/${p.id}`, {}, tokens.admin);
+  check('Fase D: no se borra un producto con movimientos → 409', r.status === 409, r.data?.error);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-G-001', descripcion: 'Cobija QA', categoria: 'TEST-Cat', cantidad: 2 });
+  check('Fase D: el agotado vuelve a recibir como INGRESO ADICIONAL', r.status === 200 && r.data.adicional === true && r.data.producto.cantidad === 2, r.data?.error);
   r = await api('POST', '/productos', { codigo_producto: 'TEST-G-002', descripcion: 'Eliminar QA', categoria: 'TEST-Cat', cantidad: 4 });
-  r = await api('DELETE', `/productos/${r.data.producto.id}`, {});
+  const idG2 = r.data.producto.id;
+  await api('PATCH', `/productos/${idG2}`, { talla: 'XL' });
+  r = await api('DELETE', `/productos/${idG2}`, {});
+  check('Fase D: el Coordinador no borra físicamente → 403', r.status === 403);
+  r = await api('DELETE', `/productos/${idG2}`, {}, tokens.admin);
   h = await historial('TEST-G-002');
-  check('Eliminar sin SBO → 200 y ELIMINACIÓN en historial con unidades', r.status === 200 && h.at(-1).accion === 'ELIMINACIÓN' && h.at(-1).detalles.includes('4 unidades'), h.at(-1)?.detalles);
+  check('Administrador borra un producto sin movimientos → 200 y ELIMINACIÓN con unidades', r.status === 200 && h.at(-1).accion === 'ELIMINACIÓN' && h.at(-1).detalles.includes('4 unidades'), h.at(-1)?.detalles);
 });
 
 // ======================= Fase C: catálogos y parámetros =======================
@@ -401,22 +416,34 @@ test('Fase C: ingreso, edición, reubicación y salida con catálogos', async ()
   h = await historial('TEST-C-1');
   check('Salida con motivo y detalle', r.status === 200 && h.at(-1).detalles === 'Retiro de 1 unidades. Motivo: TEST-Motivo. Detalle: Fundación QA', h.at(-1)?.detalles);
   r = await api('PATCH', `/productos/${idC1}`, { activo: false }, tokens.coord);
+  check('Fase D: PATCH ya no cambia "activo" → 400', r.status === 400, r.data?.error);
+  r = await api('POST', `/productos/${idC1}/inactivar`, { justificacion: 'no' }, tokens.coord);
+  check('Fase D: justificación muy corta → 400', r.status === 400);
+  r = await api('POST', `/productos/${idC1}/inactivar`, { justificacion: 'Descontinuado por QA' }, tokens.coord);
+  h = await historial('TEST-C-1');
+  check('Fase D: INACTIVACIÓN con justificación y unidades en el historial', r.status === 200 && h.at(-1).accion === 'INACTIVACIÓN' && h.at(-1).detalles === 'Justificación: Descontinuado por QA (tenía 2 unidades)', h.at(-1)?.detalles);
+  r = await api('POST', `/productos/${idC1}/inactivar`, { justificacion: 'Otra vez QA' }, tokens.coord);
+  check('Fase D: inactivar dos veces → 400', r.status === 400);
   r = await api('POST', '/productos', { codigo_producto: 'TEST-C-1', descripcion: 'x', categoria: 'TEST-Cat', cantidad: 1 }, tokens.op);
   check('Producto inactivo no recibe ingresos → 409', r.status === 409);
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-D-INACT', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-C-1', cantidad_solicitada: 1 }] }, tokens.op);
+  check('Fase D: producto inactivo no se puede solicitar en una SBO → 409', r.status === 409, r.data?.error);
 });
 
 test('Fase C: SBO con organización y ubicaciones para el Mapa', async () => {
   r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-C-SBO', beneficiario: 'Fundación inventada', items: [] }, tokens.op);
   check('Organización fuera del catálogo → 400', r.status === 400, r.data?.error);
   const org = (await api('GET', '/catalogos/organizaciones')).data.find(o => o.nombre === 'TEST-Org');
-  await api('PATCH', `/productos/${(await producto('TEST-C-1')).id}`, { activo: true }, tokens.coord);
+  r = await api('POST', `/productos/${(await producto('TEST-C-1')).id}/activar`, { justificacion: 'Vuelve a recibirse' }, tokens.coord);
+  check('Fase D: activar con justificación', r.status === 200 && r.data.activo === true, r.data?.error);
   r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-C-SBO', organizacionId: org.id, items: [{ codigo_producto: 'TEST-C-1', cantidad_solicitada: 1 }] }, tokens.op);
   check('SBO enlazada a la organización', r.status === 201 && r.data.organizacionId === org.id && r.data.beneficiario === 'TEST-Org', r.data?.error);
   r = await api('GET', '/ubicaciones', undefined, tokens.consulta);
   const rack = r.data.find(u => u.codigo === 'TEST-RACK');
-  check('GET /ubicaciones resume productos y unidades', r.status === 200 && rack.productos === 1 && rack.unidades === 2, JSON.stringify(rack));
+  // Desde la Fase D, TEST-G-001 (reubicado aquí, agotado y con 2 unidades nuevas) se conserva en TEST-RACK
+  check('GET /ubicaciones resume productos y unidades', r.status === 200 && rack.productos === 2 && rack.unidades === 4, JSON.stringify(rack));
   r = await api('GET', '/ubicaciones/test-rack/contenido', undefined, tokens.consulta);
-  check('Contenido de una ubicación', r.status === 200 && r.data.productos.length === 1 && r.data.productos[0].codigo_producto === 'TEST-C-1' && r.data.unidades === 2);
+  check('Contenido de una ubicación', r.status === 200 && r.data.productos.map(x => x.codigo_producto).sort().join() === 'TEST-C-1,TEST-G-001' && r.data.unidades === 4, JSON.stringify(r.data.productos.map(x => x.codigo_producto)));
   r = await api('GET', '/ubicaciones/NO-EXISTE/contenido', undefined, tokens.consulta);
   check('Ubicación inexistente → 404', r.status === 404);
   r = await api('PATCH', `/catalogos/ubicaciones/${rack.id}`, { activo: false }, tokens.coord);
@@ -434,4 +461,67 @@ test('Fase C: parámetros de operación', async () => {
   check('Parámetro desconocido → 400', r.status === 400);
   r = await api('PUT', '/parametros', { stock_minimo_defecto: 8, dias_atraso_sbo: 2 }, tokens.coord);
   check('Coordinador guarda parámetros', r.status === 200 && r.data.stock_minimo_defecto === 8 && r.data.dias_atraso_sbo === 2);
+});
+
+// ======================= Fase D1: inventario e historial =======================
+
+test('Fase D1: inventario paginado con filtros y orden', async () => {
+  r = await api('GET', '/productos?pagina=1&porPagina=2&q=TEST-&estado=todos&orden=codigo_producto', undefined, tokens.consulta);
+  check('Lista paginada', r.status === 200 && r.data.datos.length === 2 && r.data.total === 3 && r.data.pagina === 1 && r.data.porPagina === 2, JSON.stringify(r.data).slice(0, 300));
+  check('Orden por código ascendente', r.data.datos.map(x => x.codigo_producto).join() === 'TEST-B-1,TEST-C-1');
+  r = await api('GET', '/productos?pagina=1&q=TEST-');
+  check('Por defecto solo activos', r.data.total === 2 && r.data.datos.every(x => x.activo), r.data.datos.map(x => x.codigo_producto).join());
+  r = await api('GET', '/productos?pagina=1&q=TEST-&estado=inactivos');
+  check('Filtro de inactivos', r.data.total === 1 && r.data.datos[0].codigo_producto === 'TEST-B-1');
+  r = await api('GET', '/productos?pagina=1&q=TEST-&bajoMinimo=1');
+  const bajos = r.data.datos.map(x => x.codigo_producto).sort().join();
+  check('Bajo stock mínimo (propio 5 y por defecto 8)', bajos === 'TEST-C-1,TEST-G-001' && r.data.datos.every(x => x.bajo_minimo && x.libre < x.stock_minimo_efectivo), bajos);
+  r = await api('GET', '/productos?pagina=1&q=TEST-&ubicacion=test-rack');
+  check('Filtro por ubicación', r.data.datos.map(x => x.codigo_producto).join() === 'TEST-C-1,TEST-G-001', r.data.datos.map(x => x.codigo_producto).join());
+  r = await api('GET', '/productos?pagina=1&q=TEST-&sinUbicar=1&estado=todos');
+  check('Filtro sin ubicar', r.data.total === 1 && r.data.datos[0].codigo_producto === 'TEST-B-1', r.data.datos.map(x => x.codigo_producto).join());
+  r = await api('GET', '/productos?pagina=1&q=TEST-&estado=todos&orden=cantidad&dir=desc');
+  const cantidades = r.data.datos.map(x => x.cantidad);
+  check('Orden por cantidad descendente', cantidades.every((c, i) => i === 0 || cantidades[i - 1] >= c), cantidades.join());
+  check('Resumen de unidades del filtro', r.data.resumen.unidades === cantidades.reduce((s, c) => s + c, 0));
+  check('Última actualización presente', r.data.datos.every(x => !Number.isNaN(Date.parse(x.ultima_actualizacion))));
+  r = await api('GET', '/productos?pagina=0');
+  check('Página no válida → 400', r.status === 400);
+  r = await api('GET', '/productos?pagina=1&orden=inventado');
+  check('Orden no válido → 400', r.status === 400);
+  r = await api('GET', '/productos?pagina=1&porPagina=500');
+  check('Página demasiado grande → 400', r.status === 400);
+});
+
+test('Fase D1: kardex del producto', async () => {
+  const g1 = await producto('TEST-G-001');
+  r = await api('GET', `/productos/${g1.id}/kardex`, undefined, tokens.consulta);
+  const movs = r.data.movimientos;
+  check('Kardex con saldo acumulado que coincide con el stock', r.status === 200 && r.data.coincide && r.data.saldo_historial === 2 && movs.at(-1).saldo === 2 && movs[0].accion === 'INGRESO NUEVO' && movs[0].saldo === 10, JSON.stringify({ coincide: r.data.coincide, saldo: r.data.saldo_historial, movs: movs.map(m => `${m.accion}:${m.saldo}`) }));
+  check('El agotamiento queda en el kardex con saldo 0', movs.some(m => m.saldo === 0));
+  const c1 = await producto('TEST-C-1');
+  r = await api('GET', `/productos/${c1.id}/kardex`);
+  check('Kardex lista las SBO en curso (creada: aún sin reserva)', r.data.reservas.length === 1 && r.data.reservas[0].codigo_sbo === 'TEST-C-SBO' && r.data.reservas[0].reserva_stock === false && r.data.reservas[0].cantidad === 1, JSON.stringify(r.data.reservas));
+  check('Kardex de TEST-C-1 sin avisos', r.data.coincide && r.data.avisos.length === 0, JSON.stringify(r.data.avisos));
+  r = await api('GET', '/productos/999999/kardex');
+  check('Kardex de producto inexistente → 404', r.status === 404);
+});
+
+test('Fase D1: historial con filtros y paginación', async () => {
+  r = await api('GET', '/historial?pagina=1&porPagina=3&codigo=test-g-001', undefined, tokens.consulta);
+  const fechas = r.data.datos.map(x => Date.parse(x.fecha));
+  check('Historial paginado y filtrado por código', r.status === 200 && r.data.datos.length === 3 && r.data.total > 3 && r.data.datos.every(x => x.codigo_producto === 'TEST-G-001'), JSON.stringify(r.data).slice(0, 300));
+  check('Del más reciente al más antiguo', fechas.every((f, i) => i === 0 || fechas[i - 1] >= f));
+  r = await api('GET', '/historial?pagina=1&sbo=TEST-G-SBO3');
+  const acciones = r.data.datos.map(x => x.accion);
+  check('Filtro por SBO: eventos y despacho, con su SBO enlazada', acciones.includes('SBO DESPACHADA') && acciones.includes('SALIDA SBO') && r.data.datos.every(x => x.sbo === 'TEST-G-SBO3'), acciones.join());
+  r = await api('GET', `/historial?pagina=1&accion=${encodeURIComponent('INACTIVACIÓN')}&operario=test-coord&q=QA`);
+  check('Filtro por acción, operario y texto', r.data.total === 1 && r.data.datos[0].codigo_producto === 'TEST-C-1', JSON.stringify(r.data.datos.map(x => x.detalles)));
+  const hoy = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Bogota' });
+  r = await api('GET', `/historial?pagina=1&desde=${hoy}&hasta=${hoy}&codigo=TEST-`);
+  check('Filtro por fecha (día de Bogotá)', r.status === 200 && r.data.total > 0);
+  r = await api('GET', '/historial?pagina=1&desde=2026-13-01');
+  check('Fecha no válida → 400', r.status === 400);
+  r = await api('GET', '/historial/filtros', undefined, tokens.consulta);
+  check('Valores para los filtros', r.status === 200 && r.data.acciones.includes('INACTIVACIÓN') && r.data.operarios.includes('TEST-coord'));
 });

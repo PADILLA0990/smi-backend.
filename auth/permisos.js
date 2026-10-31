@@ -9,8 +9,9 @@ const PERMISOS = {
   'inventario:ver': TODOS,          // dashboard, inventario, historial y solicitudes
   'movimientos:registrar': OPERACION, // ingresos y retiros
   'productos:reubicar': OPERACION,
-  'productos:eliminar': SUPERVISION,
-  'productos:editar': SUPERVISION,   // descripción, categoría, talla, condición, stock mínimo, activo
+  'productos:inactivar': SUPERVISION, // borrado lógico con justificación (y reactivar)
+  'productos:eliminar': ['ADMINISTRADOR'], // borrado físico, solo productos sin movimientos
+  'productos:editar': SUPERVISION,   // descripción, categoría, talla, condición, grupo, stock mínimo
   'sbo:crear': OPERACION,           // crear y editar ítems mientras está CREADA
   'sbo:alistar': OPERACION,         // iniciar y finalizar alistamiento
   'sbo:aprobar': SUPERVISION,

@@ -27,4 +27,11 @@ Reglas que no estaban definidas y se resolvieron con la opción más simple. Las
 | 21 | 30/10/2026 | Las condiciones (Perfecto estado, Buen estado, En deterioro, Dañado; definidas por el usuario el 31/10/2026) y los grupos (Mujer, Hombre, Unisex, Niña, Niño, Infantil unisex, Bebé, Adulto mayor) son listas fijas. | `lib/catalogos.js` | En código |
 | 22 | 30/10/2026 | El texto `categoria` y `estado` del producto se conserva por compatibilidad; la API muestra el nombre del catálogo y `estado` refleja la condición. | `productos/routes.js` | — |
 | 23 | 30/10/2026 | Al reubicar, `ubicacion_general` toma la zona de la ubicación (o "Almacenamiento" si no tiene zona). | `productos/routes.js` | Zona en el catálogo |
-| 24 | 30/10/2026 | Editar productos (categoría, condición, talla, stock mínimo, activo) es de Coordinador y Administrador. El operario solo registra movimientos. | `auth/permisos.js` | Sí (en código) |
+| 24 | 30/10/2026 | Editar productos (categoría, condición, talla, stock mínimo) es de Coordinador y Administrador. El operario solo registra movimientos. | `auth/permisos.js` | Sí (en código) |
+| 25 | 31/10/2026 | Un producto que llega a 0 unidades se conserva visible (decisión del usuario). | `lib/stock.js` | — |
+| 26 | 31/10/2026 | Inactivar o activar pide una justificación en texto libre (5 a 200 caracteres), no un motivo del catálogo: explica el caso y no clasifica un movimiento de stock. | `productos/routes.js` | — |
+| 27 | 31/10/2026 | Un producto inactivo conserva su stock y sus unidades se pueden retirar. No recibe ingresos ni entra en SBO nuevas. No se inactiva si está en una SBO en curso. | `productos/routes.js` | — |
+| 28 | 31/10/2026 | "Sin movimientos" (para el borrado físico) = solo ingreso inicial, ediciones o cambios de estado, sin SBO ni reservas. | `productos/routes.js` | `ACCIONES_SIN_MOVIMIENTO` |
+| 29 | 31/10/2026 | "Bajo stock mínimo" = lo libre (total menos reservado) es menor que el mínimo. Los inactivos no alertan. | `lib/inventario.js` | Parámetro `stock_minimo_defecto` |
+| 30 | 31/10/2026 | Los filtros, el orden y la paginación del inventario se resuelven en memoria en el servidor. Si el inventario crece a decenas de miles de productos, se pasa a SQL. | `lib/inventario.js` | — |
+| 31 | 31/10/2026 | Dividir un producto entre varias ubicaciones queda para después de la Fase G (decisión del usuario). | — | — |

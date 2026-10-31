@@ -40,6 +40,9 @@ async function prepararItems(tx, items) {
     if (!producto) {
       throw new StockError(404, `El producto ${codigo} no existe en el inventario.`);
     }
+    if (!producto.activo) {
+      throw new StockError(409, `El producto ${codigo} está inactivo y no se puede solicitar.`);
+    }
     preparados.push({
       codigo_producto: producto.codigo_producto,
       descripcion: producto.descripcion,
