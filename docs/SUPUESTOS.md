@@ -35,3 +35,12 @@ Reglas que no estaban definidas y se resolvieron con la opción más simple. Las
 | 29 | 31/10/2026 | "Bajo stock mínimo" = lo libre (total menos reservado) es menor que el mínimo. Los inactivos no alertan. | `lib/inventario.js` | Parámetro `stock_minimo_defecto` |
 | 30 | 31/10/2026 | Los filtros, el orden y la paginación del inventario se resuelven en memoria en el servidor. Si el inventario crece a decenas de miles de productos, se pasa a SQL. | `lib/inventario.js` | — |
 | 31 | 31/10/2026 | Dividir un producto entre varias ubicaciones queda para después de la Fase G (decisión del usuario). | — | — |
+| 32 | 31/10/2026 | Cada condición tiene su propio código: un ingreso con otra condición sobre un código existente se rechaza (409). En la interfaz, "Otra condición" crea otro código con los mismos datos (decisión del usuario). | `documentos/routes.js` | — |
+| 33 | 31/10/2026 | La fecha del documento es siempre la del registro; no se registran movimientos con fecha anterior (decisión del usuario). | `documentos/routes.js` | — |
+| 34 | 31/10/2026 | Numeración consecutiva por tipo y sin año: `ING-0001`, `SAL-0001` (decisión del usuario). Un bloqueo de la base evita números repetidos. | `documentos/routes.js` | — |
+| 35 | 31/10/2026 | El donante o proveedor del ingreso y la organización destino de la salida son opcionales (hay donaciones anónimas y entregas directas). El motivo de salida es obligatorio. | `documentos/routes.js` | — |
+| 36 | 31/10/2026 | Un documento admite hasta 100 líneas y hasta 100.000 unidades de manejo por línea. Un código no se repite dentro del mismo documento. | `documentos/routes.js` | `MAX_LINEAS`, `MAX_CANTIDAD` |
+| 37 | 31/10/2026 | Un documento registrado no se edita ni se anula; las correcciones se harán con ajustes (Fase G). | — | — |
+| 38 | 31/10/2026 | En la interfaz, la condición es obligatoria al crear un producto desde un documento. La API la sigue aceptando vacía por compatibilidad. | `ModalProductoNuevo.jsx` | — |
+| 39 | 31/10/2026 | La lista de documentos está en "Ingresos y Retiros" (roles que registran movimientos). El rol Consulta abre los comprobantes desde el historial o el kardex. | `App.jsx` | — |
+| 40 | 31/10/2026 | La exportación a Excel queda como complemento para después (decisión del usuario). | — | — |

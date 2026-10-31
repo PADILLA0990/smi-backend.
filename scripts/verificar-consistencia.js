@@ -39,7 +39,9 @@ function recalcular(historial, zonas = {}) {
         const n = numero(d, /cantidad:\s*(\d+)/i);
         if (n === null) { p.avisos.push(`#${mov.id} INGRESO NUEVO sin cantidad legible`); break; }
         if (p.existe && !p.agotado) p.avisos.push(`#${mov.id} INGRESO NUEVO sobre un producto que ya existía`);
-        Object.assign(p, { existe: true, agotado: false, cantidad: n, ubicacion_general: 'Recepción', codigo_estanteria: null });
+        // Desde la Fase D2 el detalle termina en "Ubicación inicial: X" cuando no es Recepción
+        const inicial = (d.match(/Ubicación inicial:\s*(.+)$/i) || [])[1];
+        Object.assign(p, { existe: true, agotado: false, cantidad: n, ubicacion_general: inicial ? inicial.trim() : 'Recepción', codigo_estanteria: null });
         break;
       }
       case 'INGRESO ADICIONAL': {

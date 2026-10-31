@@ -91,3 +91,15 @@ test('Fase D: la reubicación espera la zona del catálogo y cada movimiento lle
   assert.ok(r.ok, JSON.stringify(r.diferencias));
   assert.deepStrictEqual(r.movimientos.map(m => m.saldo), [10, 7, 7]);
 });
+
+test('Fase D2: ingresos por documento con desglose y ubicación inicial', () => {
+  const historial = [
+    mov(1, 'H', 'INGRESO NUEVO', 'Ingresó cantidad: 24 (2 Caja × 12). Documento ING-0001. Ubicación inicial: A-01'),
+    mov(2, 'H', 'INGRESO ADICIONAL', 'Ingresó cantidad: 5. Stock total: 29. Documento ING-0002'),
+    mov(3, 'H', 'SALIDA/RETIRO', 'Retiro de 20 unidades (1 Paca × 20). Motivo: X. Destino: Org. Documento SAL-0001')
+  ];
+  const productos = [{ codigo_producto: 'H', cantidad: 9, cantidad_reservada: 0, ubicacion_general: 'A-01', codigo_estanteria: null }];
+  const [r] = compararConsistencia({ productos, historial });
+  assert.ok(r.ok && r.avisos.length === 0, JSON.stringify([r.diferencias, r.avisos]));
+  assert.deepStrictEqual(r.movimientos.map(m => m.saldo), [24, 29, 9]);
+});

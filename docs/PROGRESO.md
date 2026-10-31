@@ -16,7 +16,7 @@ Producción: frontend https://smi-frontend-murex.vercel.app · backend https://s
 | 30/10/2026 | Fase B: usuarios, roles y seguridad (migración 1_usuarios_roles aplicada tras respaldo con pg_dump) | backend `1a56f42`, frontend `9b4844f` |
 | 31/10/2026 | Hotfix: el login espera a que el servidor de Render despierte | frontend `88a1bbf` |
 | 31/10/2026 | Fase C: configuración y catálogos (migración 2_catalogos aplicada tras respaldo con pg_dump) | backend `f3ab88d`, frontend `a3a5951` |
-| 31/10/2026 | Fase D1: inventario e historial (filtros, paginación, kardex, inactivar) | ver commit "Fase D1" |
+| 31/10/2026 | Fase D1: inventario e historial (filtros, paginación, kardex, inactivar) | backend `ed1369e`, frontend `ccb1152` |
 
 ## Verificaciones previas (30/10/2026, solo lectura)
 
@@ -126,9 +126,34 @@ Sin cambios en la base de datos.
 
 **Pruebas:** backend 29 de 29 (22 de integración, 7 unitarias); frontend 18 de 18; navegador 25 de 25.
 
+## Fase D2 · Ingresos y retiros como documentos (31/10/2026, probada en `smi_pruebas`, pendiente de desplegar)
+
+**Base de datos:** migración `3_documentos`, solo aditiva: tablas `Documento` y `DocumentoLinea`, y la columna opcional `Historial.documentoId`. No modifica ni borra datos.
+
+**Decisiones del usuario:** cada condición tiene su propio código de producto; la fecha del documento es siempre la del registro; la numeración es un consecutivo sin año (`ING-0001`, `SAL-0001`); la exportación a Excel queda como complemento para después.
+
+**API** (detalle en `docs/API.md`)
+- `POST /documentos/ingreso` y `POST /documentos/salida`: varias líneas en una sola transacción. Si una línea falla no se guarda nada, y el error dice qué línea fue.
+- Cada línea tiene una unidad de manejo del catálogo (p. ej. 2 cajas × 20 = 40 unidades).
+- Un ingreso puede crear productos nuevos y tiene origen (Donación o Compra), donante o proveedor opcional y documento soporte.
+- Una salida tiene motivo y organización destino opcional.
+- `GET /documentos?pagina=` (filtros por tipo, fechas y texto) y `GET /documentos/:id` (por id o por número).
+- El historial y el kardex traen el número del documento de cada movimiento.
+- `POST /productos` y `POST /salida` siguen funcionando igual; comparten la lógica con los documentos (`lib/movimientos.js`).
+- El verificador lee la ubicación inicial de un producto nuevo creado fuera de Recepción.
+- Corrección: la consulta SQL directa que bloquea el producto (`lib/stock.js`) ahora nombra la tabla con su esquema. Con el pooler de Supabase en modo transacción, en `smi_pruebas` a veces leía la tabla de `public`, y las pruebas fallaban de forma intermitente. En producción no tenía efecto, porque allí el esquema es `public`.
+
+**Frontend**
+- "Ingresos y Retiros" con tres pestañas: Nuevo ingreso, Nueva salida y Documentos.
+- Líneas con autocompletar que muestra la condición y el stock (libre, en las salidas).
+- "Producto nuevo" y "Otra condición" (copia los datos del artículo con otro código) sin salir del documento.
+- Confirmación con el resumen de líneas y unidades antes de guardar.
+- Comprobante imprimible o en PDF con firmas de entrega y recibido, enlazado desde el historial y el kardex.
+
+**Pruebas:** backend 33 de 33 (25 de integración, 8 unitarias); frontend 22 de 22; navegador 25 de 25, más el comprobante impreso a PDF y revisado.
+
 ## Pendiente (en orden)
 
-- **D2** Ingresos y retiros como documentos (migración `3_documentos`).
 - **D3** Solicitudes SBO.
 - **D4** Dashboard.
 - **E** Novedades y trazabilidad.

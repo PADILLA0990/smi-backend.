@@ -129,7 +129,54 @@ Solo el Administrador, y solo si el producto no tiene movimientos aparte de su i
 | `sbo` | Código de SBO: sus eventos y sus despachos |
 | `q` | Texto en código, acción, operario o detalle |
 
-Cada registro trae `sbo` (la SBO relacionada o `null`) y `es_sbo` (si el registro es un evento de SBO y no de un producto).
+Cada registro trae `sbo` (la SBO relacionada o `null`) y `es_sbo` (si el registro es un evento de SBO y no de un producto). Desde la Fase D2 también trae `documento` (`{ id, numero }` o `null`); el kardex lo incluye en cada movimiento.
+
+## Documentos de ingreso y salida (Fase D2)
+
+| Ruta | Permiso |
+|---|---|
+| POST `/documentos/ingreso` | `movimientos:registrar` |
+| POST `/documentos/salida` | `movimientos:registrar` |
+| GET `/documentos?pagina=` | `inventario:ver` |
+| GET `/documentos/:id` (id o número, p. ej. `ING-0001`) | `inventario:ver` |
+
+Un documento agrupa varias líneas y se registra en **una sola transacción**: si una línea falla no se guarda nada, y el error empieza por `Línea N (código): …`. La fecha es la del registro y el número es consecutivo por tipo, sin año (`ING-0001`, `SAL-0001`). Cada línea deja su movimiento en el historial (INGRESO NUEVO, INGRESO ADICIONAL o SALIDA/RETIRO) con `documentoId` y el número al final del detalle.
+
+**Ingreso**
+
+```json
+{
+  "origen": "DONACION",
+  "terceroId": 3,
+  "soporte": "Remisión 123",
+  "observaciones": "…",
+  "lineas": [
+    { "codigo_producto": "ROP-005", "cantidad": 2, "unidadId": 4 },
+    { "codigo_producto": "HOG-001", "cantidad": 5, "nuevo": { "descripcion": "Linterna", "categoriaId": 5, "condicion": "PERFECTO", "talla": "", "grupo": null, "stock_minimo": null, "ubicacion_general": "Recepción" } }
+  ]
+}
+```
+
+- `origen`: `DONACION` o `COMPRA`. `terceroId` es opcional y debe ser donante (o "ambos") en una donación, y proveedor (o "ambos") en una compra.
+- `cantidad` va en la unidad de manejo (`unidadId`, opcional). Las unidades de inventario son `cantidad × factor`.
+- Sin `nuevo`, el código debe existir y estar activo (404 o 409). Con `nuevo`, el código no debe existir (409).
+- **Cada condición tiene su propio código:** si se envía `condicion` y no es la del producto existente, responde 409.
+- Hasta 100 líneas, de 1 a 100.000 por línea. Un código no se repite en el mismo documento (400).
+
+**Salida**
+
+```json
+{ "motivoId": 2, "organizacionId": 7, "observaciones": "…", "lineas": [{ "codigo_producto": "ROP-005", "cantidad": 3, "unidadId": 1 }] }
+```
+
+- El motivo (tipo SALIDA) es obligatorio. La organización destino es opcional.
+- Solo se retira el stock libre. Los productos inactivos se pueden retirar.
+
+**Respuesta** (201, y también la de `GET /documentos/:id`): el documento con `tipo`, `consecutivo`, `numero`, `fecha`, `origen`, `tercero_nombre`, `soporte`, `motivo_nombre`, `organizacion_nombre`, `observaciones`, `operario` y `lineas`. Cada línea trae `codigo_producto`, `descripcion`, `condicion`, `unidad`, `factor`, `cantidad_manejo`, `cantidad` (unidades) y `producto_nuevo`. Los nombres se copian al guardar, así que el comprobante no cambia si después se edita el catálogo.
+
+**Lista:** `GET /documentos?pagina=1` responde `{ datos, total, pagina, porPagina }`, del más reciente al más antiguo. Admite `porPagina` (25 por defecto), `tipo` (`INGRESO` o `SALIDA`), `desde` y `hasta` (`AAAA-MM-DD`, Bogotá) y `q` (número, donante, organización, soporte, operario o código de producto). En la lista, `lineas` es el número de líneas y `unidades` es el total.
+
+`POST /productos` y `POST /salida` siguen disponibles para un solo producto, sin documento.
 
 ## Catálogos (Fase C)
 

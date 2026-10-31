@@ -2,19 +2,10 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { manejarError } = require('../lib/errores');
-const { StockError } = require('../lib/stock');
 const { autorizar } = require('../auth/middleware');
-const { leerPaginacion } = require('../lib/inventario');
+const { leerPaginacion, filtroFechas } = require('../lib/inventario');
 
 const router = express.Router();
-
-// Las fechas del filtro son días calendario de Bogotá (UTC-5, sin horario de verano)
-function inicioDelDia(valor, campo) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) throw new StockError(400, `La fecha "${campo}" debe tener el formato AAAA-MM-DD.`);
-  const fecha = new Date(`${valor}T00:00:00-05:00`);
-  if (Number.isNaN(fecha.getTime())) throw new StockError(400, `La fecha "${campo}" no es válida.`);
-  return fecha;
-}
 
 const texto = (v) => (typeof v === 'string' ? v.trim() : '');
 
@@ -35,13 +26,7 @@ router.get('/historial', autorizar('inventario:ver'), async (req, res) => {
       return res.json(await prisma.historial.findMany({ orderBy: { fecha: 'desc' } }));
     }
     const { pagina, porPagina } = leerPaginacion(req.query, 25);
-    const and = [];
-    if (req.query.desde) and.push({ fecha: { gte: inicioDelDia(req.query.desde, 'desde') } });
-    if (req.query.hasta) {
-      const fin = inicioDelDia(req.query.hasta, 'hasta');
-      fin.setUTCDate(fin.getUTCDate() + 1);
-      and.push({ fecha: { lt: fin } });
-    }
+    const and = filtroFechas(req.query);
     const codigo = texto(req.query.codigo);
     if (codigo) and.push({ codigo_producto: { contains: codigo, mode: 'insensitive' } });
     if (texto(req.query.accion)) and.push({ accion: texto(req.query.accion) });
@@ -65,7 +50,10 @@ router.get('/historial', autorizar('inventario:ver'), async (req, res) => {
     const where = { AND: and };
     const [total, registros] = await Promise.all([
       prisma.historial.count({ where }),
-      prisma.historial.findMany({ where, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], skip: (pagina - 1) * porPagina, take: porPagina })
+      prisma.historial.findMany({
+        where, orderBy: [{ fecha: 'desc' }, { id: 'desc' }], skip: (pagina - 1) * porPagina, take: porPagina,
+        include: { documento: { select: { id: true, numero: true } } }
+      })
     ]);
     res.json({
       datos: registros.map(r => ({ ...r, sbo: sboDe(r), es_sbo: r.accion.startsWith('SBO ') })),

@@ -23,6 +23,8 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - `productos/routes.js`: productos, ingreso, salida, reubicar, editar, kardex, inactivar/activar y borrado físico (solo Administrador, sin movimientos).
 - `lib/inventario.js`: lista paginada con filtros y orden, y kardex (reutiliza `recalcular` del verificador).
 - `historial/routes.js`: historial con filtros y paginación (`?pagina=`); sin `pagina` devuelve todo.
+- `documentos/routes.js`: documentos de ingreso y salida de varias líneas en una transacción (`ING-0001`, `SAL-0001`). Cada condición tiene su propio código.
+- `lib/movimientos.js`: crear producto, sumar y retirar stock con su historial. Lo comparten `productos/routes.js` y los documentos; el detalle conserva el formato que lee el verificador.
 - `solicitudes/`: SBO (`estados.js` es la máquina de estados).
 - `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`. Un producto agotado se conserva con 0 unidades.
 - `lib/errores.js`: errores con status y mensajes en español.
@@ -32,6 +34,7 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 
 ## Reglas
 - Todo movimiento de stock y su historial van en **la misma transacción** (`prisma.$transaction`).
+- El SQL directo (`$queryRaw`) nombra las tablas con su esquema (ver `tablaProducto` en `lib/stock.js`). Con el pooler en modo transacción, el `search_path` no es confiable.
 - **Cualquier cambio en la base de producción requiere autorización explícita del usuario.**
   - Migraciones versionadas y aditivas en `prisma/migrations` (nunca `db push`). Se prueban primero con `migrate deploy` en `smi_pruebas`.
   - En producción, la primera vez se marca la línea base con `migrate resolve --applied 0_init`. Antes de aplicar se respalda con `pg_dump`.

@@ -32,16 +32,19 @@ model Producto {
 }
 
 model Historial {
-  id              Int      @id @default(autoincrement())
+  id              Int        @id @default(autoincrement())
   codigo_producto String
   accion          String
   operario        String // Nombre de usuario de quien hizo el movimiento (texto: conserva los registros previos a la Fase B)
   detalles        String?
-  fecha           DateTime @default(now())
+  fecha           DateTime   @default(now())
   usuarioId       Int? // Usuario autenticado (vacío en registros anteriores a la Fase B)
-  usuario         Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  usuario         Usuario?   @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  documentoId     Int? // Fase D2: documento de ingreso o salida al que pertenece el movimiento
+  documento       Documento? @relation(fields: [documentoId], references: [id], onDelete: SetNull)
 
   @@index([usuarioId])
+  @@index([documentoId])
 }
 
 // --- MÓDULO DE SOLICITUDES SBO ---
@@ -127,6 +130,7 @@ model Usuario {
   actualizado_en        DateTime        @updatedAt
   sesiones              SesionRefresh[]
   historial             Historial[]
+  documentos            Documento[]
 }
 
 model SesionRefresh {
@@ -189,6 +193,7 @@ model Organizacion {
   creado_en      DateTime    @default(now())
   actualizado_en DateTime    @updatedAt
   solicitudes    Solicitud[]
+  documentos     Documento[]
 }
 
 model Tercero {
@@ -202,6 +207,7 @@ model Tercero {
   activo         Boolean     @default(true)
   creado_en      DateTime    @default(now())
   actualizado_en DateTime    @updatedAt
+  documentos     Documento[]
 }
 
 model Motivo {
@@ -211,6 +217,8 @@ model Motivo {
   activo         Boolean    @default(true)
   creado_en      DateTime   @default(now())
   actualizado_en DateTime   @updatedAt
+
+  documentos Documento[]
 
   @@unique([tipo, nombre])
 }
@@ -242,4 +250,62 @@ model Parametro {
   clave          String   @id
   valor          String
   actualizado_en DateTime @updatedAt
+}
+
+// --- DOCUMENTOS DE INGRESO Y SALIDA (Fase D2) ---
+// Un documento agrupa varias líneas que se registran en una sola transacción.
+// Los nombres del catálogo se copian al guardar: el comprobante no cambia si luego se edita el catálogo.
+
+enum TipoDocumento {
+  INGRESO
+  SALIDA
+}
+
+enum OrigenIngreso {
+  DONACION
+  COMPRA
+}
+
+model Documento {
+  id                  Int              @id @default(autoincrement())
+  tipo                TipoDocumento
+  consecutivo         Int // Por tipo, sin año: ING-0001, SAL-0001
+  numero              String           @unique
+  fecha               DateTime         @default(now())
+  origen              OrigenIngreso? // Solo ingresos
+  terceroId           Int? // Donante o proveedor (ingresos, opcional)
+  tercero             Tercero?         @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+  tercero_nombre      String?
+  soporte             String? // Remisión, factura o acta del donante
+  motivoId            Int? // Motivo de salida (salidas)
+  motivo              Motivo?          @relation(fields: [motivoId], references: [id], onDelete: SetNull)
+  motivo_nombre       String?
+  organizacionId      Int? // Organización destino (salidas, opcional)
+  organizacion        Organizacion?    @relation(fields: [organizacionId], references: [id], onDelete: SetNull)
+  organizacion_nombre String?
+  observaciones       String?
+  operario            String
+  usuarioId           Int?
+  usuario             Usuario?         @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  lineas              DocumentoLinea[]
+  historial           Historial[]
+
+  @@unique([tipo, consecutivo])
+  @@index([fecha])
+}
+
+model DocumentoLinea {
+  id              Int        @id @default(autoincrement())
+  documentoId     Int
+  documento       Documento  @relation(fields: [documentoId], references: [id], onDelete: Cascade)
+  codigo_producto String // Texto (no FK), como en SolicitudItem
+  descripcion     String
+  condicion       Condicion? // La del producto al registrar (cada condición tiene su propio código)
+  unidad          String // Unidad de manejo (copia del catálogo)
+  factor          Int
+  cantidad_manejo Int // Cantidad en la unidad de manejo
+  cantidad        Int // Unidades de inventario: cantidad_manejo × factor
+  producto_nuevo  Boolean    @default(false)
+
+  @@index([documentoId])
 }

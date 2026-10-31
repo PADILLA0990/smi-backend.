@@ -10,6 +10,7 @@ const usuariosRoutes = require('./usuarios/routes');
 const productosRoutes = require('./productos/routes');
 const solicitudesRoutes = require('./solicitudes/routes');
 const historialRoutes = require('./historial/routes');
+const documentosRoutes = require('./documentos/routes');
 const { router: catalogosRoutes } = require('./catalogos/routes');
 
 const app = express();
@@ -44,6 +45,9 @@ app.use('/api', productosRoutes);
 
 // Historial (solo lectura, con filtros y paginación)
 app.use('/api', historialRoutes);
+
+// Documentos de ingreso y salida de varias líneas (Fase D2)
+app.use('/api', documentosRoutes);
 
 app.use('/api/solicitudes', solicitudesRoutes);
 

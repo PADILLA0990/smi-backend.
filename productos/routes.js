@@ -1,46 +1,14 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
-const { descontarStock, StockError } = require('../lib/stock');
+const { StockError } = require('../lib/stock');
 const { manejarError, esEnteroPositivo, campoFaltante } = require('../lib/errores');
 const { registrarHistorial } = require('../lib/historial');
 const { autorizar } = require('../auth/middleware');
-const { CONDICIONES, GRUPOS, resolverActivo } = require('../lib/catalogos');
+const { CONDICIONES, resolverActivo } = require('../lib/catalogos');
 const { listarProductos, kardexProducto, ESTADOS_SBO_ACTIVOS } = require('../lib/inventario');
+const { validarAtributos, resolverCategoria, resolverUbicacion, crearProducto, sumarStock, retirarStock } = require('../lib/movimientos');
 
 const router = express.Router();
-
-// Atributos opcionales del producto (Fase C). Devuelve solo los campos enviados, ya validados.
-function validarAtributos(body) {
-  const data = {};
-  if ('talla' in body) {
-    const talla = typeof body.talla === 'string' ? body.talla.trim() : '';
-    if (talla.length > 20) throw new StockError(400, 'Talla: máximo 20 caracteres.');
-    data.talla = talla || null;
-  }
-  if ('condicion' in body) {
-    if (body.condicion && !Object.hasOwn(CONDICIONES, body.condicion)) throw new StockError(400, 'Condición no válida.');
-    data.condicion = body.condicion || null;
-  }
-  if ('grupo' in body) {
-    if (body.grupo && !GRUPOS.includes(body.grupo)) throw new StockError(400, 'Género o grupo etario no válido.');
-    data.grupo = body.grupo || null;
-  }
-  if ('stock_minimo' in body) {
-    const vacio = body.stock_minimo === null || body.stock_minimo === '';
-    const n = Number(body.stock_minimo);
-    if (!vacio && (!Number.isInteger(n) || n < 0 || n > 100000)) throw new StockError(400, 'Stock mínimo: número entero entre 0 y 100.000.');
-    data.stock_minimo = vacio ? null : n;
-  }
-  return data;
-}
-
-// La categoría llega como id (categoriaId) o por nombre (categoria); debe estar activa en el catálogo
-const resolverCategoria = (tx, body) =>
-  resolverActivo(tx, 'categoria', body.categoriaId ?? body.categoria, { etiqueta: 'La categoría' });
-
-// Una ubicación del catálogo, por su código
-const resolverUbicacion = (tx, codigo) =>
-  resolverActivo(tx, 'ubicacion', codigo, { campoTexto: 'codigo', etiqueta: 'La ubicación' });
 
 const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
 
@@ -107,39 +75,14 @@ router.post('/productos', autorizar('movimientos:registrar'), async (req, res) =
 
     const codigo_producto = req.body.codigo_producto.trim();
     const descripcion = req.body.descripcion.trim();
-    const atributos = validarAtributos(req.body);
+    validarAtributos(req.body);
 
     const resultado = await prisma.$transaction(async (tx) => {
       const existente = await tx.producto.findUnique({ where: { codigo_producto } });
-
-      if (existente) {
-        if (!existente.activo) throw new StockError(409, `El producto ${codigo_producto} está inactivo. Actívelo antes de registrar ingresos.`);
-        const producto = await tx.producto.update({
-          where: { id: existente.id },
-          data: { cantidad: { increment: cantidad } }
-        });
-        await registrarHistorial(tx, codigo_producto, 'INGRESO ADICIONAL', req.usuario,
-          `Ingresó cantidad: ${cantidad}. Stock total: ${producto.cantidad}`);
-        return { producto, adicional: true };
-      }
+      if (existente) return { producto: await sumarStock(tx, existente, cantidad, req.usuario), adicional: true };
 
       // Producto nuevo: la categoría y la ubicación deben existir en los catálogos
-      if (req.body.categoriaId === undefined && (typeof req.body.categoria !== 'string' || !req.body.categoria.trim())) {
-        throw new StockError(400, 'El campo "categoria" es obligatorio.');
-      }
-      const categoria = await resolverCategoria(tx, req.body);
-      const ubicacion = await resolverUbicacion(tx, req.body.ubicacion_general || 'Recepción');
-      const producto = await tx.producto.create({
-        data: {
-          codigo_producto, descripcion, cantidad, ...atributos,
-          categoria: categoria.nombre,
-          categoriaId: categoria.id,
-          // "estado" (texto) se conserva por compatibilidad y refleja la condición
-          estado: atributos.condicion ? CONDICIONES[atributos.condicion] : (req.body.estado || 'Bueno'),
-          ubicacion_general: ubicacion.codigo
-        }
-      });
-      await registrarHistorial(tx, codigo_producto, 'INGRESO NUEVO', req.usuario, `Ingresó cantidad: ${cantidad}`);
+      const producto = await crearProducto(tx, { ...req.body, codigo_producto, descripcion }, cantidad, req.usuario);
       return { producto, adicional: false };
     }, OPCIONES_TX);
 
@@ -339,10 +282,8 @@ router.post('/salida', autorizar('movimientos:registrar'), async (req, res) => {
     const nuevaCantidad = await prisma.$transaction(async (tx) => {
       // El motivo sale del catálogo de motivos de salida
       const motivo = await resolverActivo(tx, 'motivo', motivoEnviado, { extra: { tipo: 'SALIDA' }, etiqueta: 'El motivo de salida' });
-      const restante = await descontarStock(tx, codigo_producto.trim(), cantidad_retirada);
-      await registrarHistorial(tx, codigo_producto.trim(), 'SALIDA/RETIRO', req.usuario,
-        `Retiro de ${cantidad_retirada} unidades. Motivo: ${motivo.nombre}${detalle ? `. Detalle: ${detalle}` : ''}`);
-      return restante;
+      return retirarStock(tx, codigo_producto.trim(), cantidad_retirada, req.usuario,
+        { motivo, detalle: detalle ? `. Detalle: ${detalle}` : '' });
     }, OPCIONES_TX);
 
     res.json({ message: 'Salida exitosa', nuevaCantidad });

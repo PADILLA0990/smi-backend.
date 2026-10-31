@@ -30,6 +30,8 @@ const USUARIOS = {
 const tokens = {};
 
 async function limpiarDatosTest() {
+  // Documentos de prueba (Fase D2): los registra un usuario TEST- o incluyen productos TEST-
+  await prisma.documento.deleteMany({ where: { OR: [{ operario: { startsWith: 'TEST-' } }, { lineas: { some: { codigo_producto: { startsWith: 'TEST-' } } } }] } });
   await prisma.solicitud.deleteMany({ where: { codigo_sbo: { startsWith: 'TEST-' } } });
   await prisma.historial.deleteMany({ where: { codigo_producto: { startsWith: 'TEST-' } } });
   await prisma.producto.deleteMany({ where: { codigo_producto: { startsWith: 'TEST-' } } });
@@ -64,6 +66,8 @@ before(async () => {
   await prisma.organizacion.create({ data: { nombre: 'TEST-Org' } });
   await prisma.motivo.create({ data: { tipo: 'SALIDA', nombre: 'TEST-Motivo' } });
   await prisma.ubicacion.create({ data: { codigo: 'TEST-RACK' } });
+  await prisma.tercero.create({ data: { nombre: 'TEST-Donante-D2', tipo: 'DONANTE' } });
+  await prisma.unidadManejo.create({ data: { nombre: 'TEST-Caja', factor: 12 } });
   servidor = spawn(process.execPath, [path.join(__dirname, '..', 'index.js')], {
     env: { ...process.env, PORT: String(PUERTO) },
     stdio: 'ignore'
@@ -524,4 +528,94 @@ test('Fase D1: historial con filtros y paginación', async () => {
   check('Fecha no válida → 400', r.status === 400);
   r = await api('GET', '/historial/filtros', undefined, tokens.consulta);
   check('Valores para los filtros', r.status === 200 && r.data.acciones.includes('INACTIVACIÓN') && r.data.operarios.includes('TEST-coord'));
+});
+
+// ======================= Fase D2: documentos de ingreso y salida =======================
+
+let doc1;
+
+test('Fase D2: documento de ingreso con varias líneas', async () => {
+  const cat = (await api('GET', '/catalogos/categorias')).data.find(c => c.nombre === 'TEST-Cat');
+  const caja = (await api('GET', '/catalogos/unidades')).data.find(u => u.nombre === 'TEST-Caja');
+  const donante = (await api('GET', '/catalogos/terceros')).data.find(t => t.nombre === 'TEST-Donante-D2');
+  const antes = (await producto('TEST-C-1')).cantidad;
+  const cuerpo = {
+    origen: 'DONACION', terceroId: donante.id, soporte: 'Remisión QA-1', observaciones: 'Prueba D2',
+    lineas: [
+      { codigo_producto: 'TEST-C-1', cantidad: 2, unidadId: caja.id },
+      { codigo_producto: 'TEST-E-001', cantidad: 5, nuevo: { descripcion: 'Linterna QA', categoriaId: cat.id, condicion: 'PERFECTO', ubicacion_general: 'TEST-RACK' } }
+    ]
+  };
+  r = await api('POST', '/documentos/ingreso', cuerpo, tokens.consulta);
+  check('Consulta no registra documentos → 403', r.status === 403);
+  r = await api('POST', '/documentos/ingreso', cuerpo, tokens.op);
+  doc1 = r.data;
+  check('Documento de ingreso creado con número consecutivo', r.status === 201 && /^ING-\d{4,}$/.test(doc1.numero) && doc1.operario === 'TEST-op' && doc1.tercero_nombre === 'TEST-Donante-D2' && doc1.lineas.length === 2, JSON.stringify(r.data).slice(0, 300));
+  check('Unidad de manejo: 2 cajas × 12 = 24 unidades', doc1.lineas[0].cantidad === 24 && doc1.lineas[0].cantidad_manejo === 2 && doc1.lineas[0].unidad === 'TEST-Caja');
+  check('Línea de producto nuevo', doc1.lineas[1].producto_nuevo && doc1.lineas[1].condicion === 'PERFECTO' && doc1.lineas[1].descripcion === 'Linterna QA');
+  check('El stock sube con las unidades de la línea', (await producto('TEST-C-1')).cantidad === antes + 24);
+  p = await producto('TEST-E-001');
+  check('Producto nuevo creado por el documento', p.cantidad === 5 && p.condicion === 'PERFECTO' && p.ubicacion_general === 'TEST-RACK');
+  h = await historial('TEST-C-1');
+  check('Historial enlazado al documento', h.at(-1).accion === 'INGRESO ADICIONAL' && h.at(-1).documentoId === doc1.id && h.at(-1).detalles.includes('(2 TEST-Caja × 12)') && h.at(-1).detalles.endsWith(`Documento ${doc1.numero}`), h.at(-1)?.detalles);
+  h = await historial('TEST-E-001');
+  check('Ingreso nuevo con documento y ubicación inicial', h[0].accion === 'INGRESO NUEVO' && h[0].detalles === `Ingresó cantidad: 5. Documento ${doc1.numero}. Ubicación inicial: TEST-RACK`, h[0]?.detalles);
+
+  r = await api('POST', '/documentos/ingreso', { origen: 'COMPRA', lineas: [{ codigo_producto: 'TEST-E-001', cantidad: 1, condicion: 'PERFECTO' }] }, tokens.op);
+  check('El siguiente documento toma el consecutivo siguiente', r.status === 201 && r.data.consecutivo === doc1.consecutivo + 1 && r.data.origen === 'COMPRA' && r.data.tercero_nombre === null, r.data?.error);
+
+  const c1 = await producto('TEST-C-1');
+  const otra = c1.condicion === 'DANADO' ? 'BUENO' : 'DANADO';
+  r = await api('POST', '/documentos/ingreso', { origen: 'DONACION', lineas: [{ codigo_producto: 'TEST-E-001', cantidad: 1 }, { codigo_producto: 'TEST-C-1', cantidad: 1, condicion: otra }] }, tokens.op);
+  check('Otra condición en un código existente → 409 con la línea', r.status === 409 && r.data.error.startsWith('Línea 2 (TEST-C-1)'), r.data?.error);
+  check('Si una línea falla no se guarda nada', (await producto('TEST-E-001')).cantidad === 6 && (await producto('TEST-C-1')).cantidad === c1.cantidad);
+
+  r = await api('POST', '/documentos/ingreso', { lineas: [{ codigo_producto: 'TEST-E-001', cantidad: 1 }] }, tokens.op);
+  check('Sin origen → 400', r.status === 400);
+  r = await api('POST', '/documentos/ingreso', { origen: 'COMPRA', terceroId: donante.id, lineas: [{ codigo_producto: 'TEST-E-001', cantidad: 1 }] }, tokens.op);
+  check('Un donante no sirve como proveedor → 400', r.status === 400, r.data?.error);
+  r = await api('POST', '/documentos/ingreso', { origen: 'DONACION', lineas: [{ codigo_producto: 'TEST-E-001', cantidad: 1 }, { codigo_producto: 'test-e-001', cantidad: 2 }] }, tokens.op);
+  check('Código repetido en el documento → 400', r.status === 400, r.data?.error);
+  r = await api('POST', '/documentos/ingreso', { origen: 'DONACION', lineas: [{ codigo_producto: 'TEST-NO-EXISTE', cantidad: 1 }] }, tokens.op);
+  check('Producto inexistente sin datos de producto nuevo → 404', r.status === 404, r.data?.error);
+  r = await api('POST', '/documentos/ingreso', { origen: 'DONACION', lineas: [{ codigo_producto: 'TEST-C-1', cantidad: 1, nuevo: { descripcion: 'Duplicado', categoriaId: cat.id } }] }, tokens.op);
+  check('Crear un código que ya existe → 409', r.status === 409, r.data?.error);
+  r = await api('POST', '/documentos/ingreso', { origen: 'DONACION', lineas: [] }, tokens.op);
+  check('Documento sin líneas → 400', r.status === 400);
+});
+
+test('Fase D2: documento de salida', async () => {
+  const motivo = (await api('GET', '/catalogos/motivos')).data.find(m => m.nombre === 'TEST-Motivo');
+  const org = (await api('GET', '/catalogos/organizaciones')).data.find(o => o.nombre === 'TEST-Org');
+  const c1 = (await producto('TEST-C-1')).cantidad;
+  r = await api('POST', '/documentos/salida', { motivoId: motivo.id, organizacionId: org.id, lineas: [{ codigo_producto: 'TEST-E-001', cantidad: 3 }, { codigo_producto: 'TEST-C-1', cantidad: 1 }] }, tokens.op);
+  check('Documento de salida creado', r.status === 201 && /^SAL-\d{4,}$/.test(r.data.numero) && r.data.motivo_nombre === 'TEST-Motivo' && r.data.organizacion_nombre === 'TEST-Org' && r.data.lineas.length === 2, JSON.stringify(r.data).slice(0, 300));
+  const sal = r.data;
+  check('El stock baja en cada línea', (await producto('TEST-E-001')).cantidad === 3 && (await producto('TEST-C-1')).cantidad === c1 - 1);
+  h = await historial('TEST-E-001');
+  check('Retiro con motivo, destino y documento', h.at(-1).accion === 'SALIDA/RETIRO' && h.at(-1).documentoId === sal.id && h.at(-1).detalles === `Retiro de 3 unidades. Motivo: TEST-Motivo. Destino: TEST-Org. Documento ${sal.numero}`, h.at(-1)?.detalles);
+  r = await api('POST', '/documentos/salida', { motivoId: motivo.id, lineas: [{ codigo_producto: 'TEST-C-1', cantidad: 1 }, { codigo_producto: 'TEST-E-001', cantidad: 999 }] }, tokens.op);
+  check('Stock insuficiente en una línea → 400 y no se guarda nada', r.status === 400 && r.data.error.startsWith('Línea 2 (TEST-E-001)') && (await producto('TEST-C-1')).cantidad === c1 - 1, r.data?.error);
+  r = await api('POST', '/documentos/salida', { lineas: [{ codigo_producto: 'TEST-C-1', cantidad: 1 }] }, tokens.op);
+  check('Salida sin motivo → 400', r.status === 400);
+  r = await api('POST', '/documentos/salida', { motivoId: motivo.id, lineas: [{ codigo_producto: 'TEST-NO-EXISTE', cantidad: 1 }] }, tokens.op);
+  check('Salida de un producto inexistente → 404', r.status === 404, r.data?.error);
+});
+
+test('Fase D2: consulta de documentos', async () => {
+  r = await api('GET', '/documentos?pagina=1&q=TEST-E-001', undefined, tokens.consulta);
+  check('Lista de documentos filtrada por código', r.status === 200 && r.data.total === 3 && r.data.datos.every(d => d.lineas > 0 && d.unidades > 0), JSON.stringify(r.data).slice(0, 300));
+  r = await api('GET', '/documentos?pagina=1&q=TEST-E-001&tipo=SALIDA');
+  check('Filtro por tipo', r.data.total === 1 && r.data.datos[0].tipo === 'SALIDA');
+  r = await api('GET', '/documentos?pagina=1&tipo=OTRO');
+  check('Tipo no válido → 400', r.status === 400);
+  r = await api('GET', `/documentos/${doc1.numero.toLowerCase()}`, undefined, tokens.consulta);
+  check('Documento por número, con sus líneas', r.status === 200 && r.data.id === doc1.id && r.data.lineas.length === 2);
+  r = await api('GET', '/documentos/999999');
+  check('Documento inexistente → 404', r.status === 404);
+  r = await api('GET', '/historial?pagina=1&codigo=TEST-E-001');
+  check('El historial trae el número del documento', r.data.datos.length === 3 && r.data.datos.every(x => x.documento && x.documento.numero), JSON.stringify(r.data.datos.map(x => x.documento)));
+  const e1 = await producto('TEST-E-001');
+  r = await api('GET', `/productos/${e1.id}/kardex`);
+  check('Kardex del producto creado por documento: coincide y sin avisos', r.data.coincide && r.data.avisos.length === 0 && r.data.movimientos.every(m => m.documento), JSON.stringify(r.data.avisos));
 });
