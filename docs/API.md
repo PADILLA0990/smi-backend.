@@ -73,7 +73,8 @@ Exigen sesión y permiso. Desde la Fase C, la categoría, la ubicación, el moti
 
 | Ruta | Permiso |
 |---|---|
-| GET `/productos`, `/historial`, `/solicitudes`, `/solicitudes/:id` | `inventario:ver` |
+| GET `/productos`, `/historial`, `/solicitudes`, `/solicitudes/:id`, `/solicitudes/codigo/:codigo` | `inventario:ver` |
+| GET `/solicitudes/siguiente-codigo` → `{ codigo: "SBO-0001" }` | `sbo:crear` |
 | GET `/productos/:id/kardex`, `/historial/filtros` | `inventario:ver` |
 | POST `/productos` (ingreso): `{ codigo_producto, descripcion, cantidad, categoriaId \| categoria, ubicacion_general?, condicion?, talla?, grupo?, stock_minimo? }` | `movimientos:registrar` |
 | POST `/salida`: `{ codigo_producto, cantidad_retirada, motivoId \| motivo, detalle? }` (motivo de tipo SALIDA) | `movimientos:registrar` |
@@ -81,9 +82,9 @@ Exigen sesión y permiso. Desde la Fase C, la categoría, la ubicación, el moti
 | PATCH `/productos/:id` (editar datos, queda EDICIÓN en el historial; ya no acepta `activo`) | `productos:editar` |
 | POST `/productos/:id/inactivar` y `/productos/:id/activar`: `{ justificacion }` (5 a 200 caracteres) | `productos:inactivar` |
 | DELETE `/productos/:id` (borrado físico) | `productos:eliminar` |
-| POST `/solicitudes`: `{ codigo_sbo, organizacionId \| beneficiario, items, … }` | `sbo:crear` |
+| POST `/solicitudes`: `{ codigo_sbo?, organizacionId \| beneficiario, items, … }` (sin código se asigna el siguiente `SBO-0001`) | `sbo:crear` |
 | PUT `/solicitudes/:id/items` | `sbo:crear` |
-| POST `/solicitudes/:id/transicion` | Según la acción: `aprobar` pide `sbo:aprobar`; `iniciar` y `finalizar` piden `sbo:alistar`; `despachar` pide `sbo:despachar`; `cancelar` pide `sbo:cancelar`. |
+| POST `/solicitudes/:id/transicion` | Según la acción: `aprobar` pide `sbo:aprobar`; `iniciar` y `finalizar` piden `sbo:alistar`; `despachar` pide `sbo:despachar`; `cancelar` pide `sbo:cancelar`; `renovar` pide `sbo:renovar`. |
 
 - `POST /historial` se eliminó: el historial solo lo escribe el backend.
 - `GET /productos` devuelve en `categoria` el nombre vigente del catálogo, además de `categoriaId`, `talla`, `condicion`, `grupo`, `stock_minimo` y `activo`.
@@ -130,6 +131,34 @@ Solo el Administrador, y solo si el producto no tiene movimientos aparte de su i
 | `q` | Texto en código, acción, operario o detalle |
 
 Cada registro trae `sbo` (la SBO relacionada o `null`) y `es_sbo` (si el registro es un evento de SBO y no de un producto). Desde la Fase D2 también trae `documento` (`{ id, numero }` o `null`); el kardex lo incluye en cada movimiento.
+
+## Solicitudes SBO (Fase D3)
+
+Estados: CREADA → APROBADA → EN_ALISTAMIENTO → ALISTADA → DESPACHADA. Desde cualquiera de los cuatro primeros se puede pasar a CANCELADA (usuario) o a **VENCIDA** (sistema).
+
+- **Código:** sin `codigo_sbo`, el sistema asigna el siguiente consecutivo `SBO-0001`, `SBO-0002`… Los códigos escritos a mano con otro formato no cuentan para el consecutivo. Un código repetido da 409.
+- **Lista paginada:** `GET /solicitudes?pagina=1&porPagina=20` devuelve `{ datos, total, pagina, porPagina, resumen: { atrasadas, por_vencer } }`.
+  - Filtros:
+    - `estado`: un estado, o `ACTIVAS` para las cuatro sin despachar;
+    - `organizacionId`, `alistador` (sin distinguir mayúsculas);
+    - `desde`, `hasta`: fecha de creación, AAAA-MM-DD en Bogotá;
+    - `q`: código, organización, o código o descripción de un producto;
+    - `atrasada=1`, `porVencer=1`.
+  - Sin `pagina` devuelve el arreglo completo, como antes.
+- **Campos calculados** en la lista, el detalle y las respuestas de las transiciones:
+  - `activa`, `unidades_solicitadas`, `ultimo_movimiento`, `dias_sin_movimiento`;
+  - `vence_el`, `dias_para_vencer`, `por_vencer`, `atrasada`;
+  - `tiempos: { espera_aprobacion_min, alistamiento_min, total_min, meta_alistamiento_min, excede_meta }`;
+  - cada ítem trae `referencia` (`SBO-0001-<código>`, con `-2`, `-3`… si el producto se repite), `cantidad_reservada` y `cantidad_despachada`.
+- **Atrasada:** la solicitud no está despachada, cancelada ni vencida, y la fecha de hoy en Bogotá ya pasó la fecha requerida más `dias_atraso_sbo`.
+- **Vencimiento:** una solicitud activa que lleva `dias_vencimiento_sbo` días (30) sin un evento pasa a VENCIDA. Un evento es un cambio de estado o una renovación.
+  - Se libera la reserva si la tenía.
+  - Queda un evento y un historial `SBO VENCIDA` con el usuario `sistema`.
+  - La revisión corre al arrancar el servidor, cada hora y con cada consulta de solicitudes (como mucho una vez cada 5 minutos).
+  - `vencer` no se puede pedir por la API (400).
+- **Renovar** (`accion: "renovar"`, `sbo:renovar`): deja el mismo estado y reinicia el conteo con un evento nuevo. En el historial queda `SBO RENOVADA`. En `acciones` solo aparece dentro de los `dias_aviso_vencimiento_sbo` días (5) antes de vencer.
+- **Alistamiento parcial:** si en `finalizar` alguna cantidad es menor que la solicitada, la `nota` es obligatoria (mínimo 5 caracteres). Si falta, la respuesta es 400.
+- **Versión:** `GET /version` (público, fuera de `/api`) → `{ commit, arranque }`. El commit es el que despliega Render (`RENDER_GIT_COMMIT`).
 
 ## Documentos de ingreso y salida (Fase D2)
 
@@ -203,11 +232,13 @@ Un documento agrupa varias líneas y se registra en **una sola transacción**: s
 | Método | Ruta | Permiso | Notas |
 |---|---|---|---|
 | GET | `/parametros` | `inventario:ver` | Devuelve `[{ clave, etiqueta, valor, defecto, min, max }]`. |
-| PUT | `/parametros` | `configuracion:gestionar` | Recibe `{ clave: valor }`. Una clave desconocida da 400. El lote pequeño debe ser menor que el mediano. |
+| PUT | `/parametros` | `configuracion:gestionar` | Recibe `{ clave: valor }`. Una clave desconocida da 400. El lote pequeño debe ser menor que el mediano, y los días de aviso, menos que los de vencimiento. |
 
 Claves disponibles:
 - `tiempo_meta_alistamiento_horas` (24);
 - `dias_atraso_sbo` (0);
+- `dias_vencimiento_sbo` (30);
+- `dias_aviso_vencimiento_sbo` (5);
 - `stock_minimo_defecto` (5);
 - `lote_pequeno_max` (10);
 - `lote_mediano_max` (50).

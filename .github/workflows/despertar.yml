@@ -1,0 +1,28 @@
+# Despierta el backend en Render una vez al día (plan gratuito: se duerme sin uso).
+# Al arrancar, el servidor vence las SBO sin movimiento (lib/solicitudes.js).
+# Cuando el cliente pase a un plan pago que no se duerme, esta tarea se puede borrar.
+name: Despertar servidor
+
+on:
+  schedule:
+    - cron: '0 11 * * *' # 6:00 a. m. en Bogotá (UTC-5)
+  workflow_dispatch: # permite ejecutarla a mano desde la pestaña Actions
+
+jobs:
+  despertar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Llamar al servidor hasta que responda
+        run: |
+          for intento in $(seq 1 12); do
+            codigo=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 https://smi-backend-r3ac.onrender.com/version || true)
+            echo "Intento $intento: HTTP $codigo"
+            if [ "$codigo" = "200" ]; then
+              curl -s https://smi-backend-r3ac.onrender.com/version
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "El servidor no respondió"
+          exit 1

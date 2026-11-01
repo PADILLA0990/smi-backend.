@@ -17,6 +17,8 @@ Producción: frontend https://smi-frontend-murex.vercel.app · backend https://s
 | 31/10/2026 | Hotfix: el login espera a que el servidor de Render despierte | frontend `88a1bbf` |
 | 31/10/2026 | Fase C: configuración y catálogos (migración 2_catalogos aplicada tras respaldo con pg_dump) | backend `f3ab88d`, frontend `a3a5951` |
 | 31/10/2026 | Fase D1: inventario e historial (filtros, paginación, kardex, inactivar) | backend `ed1369e`, frontend `ccb1152` |
+| 31/10/2026 | Fase D2: ingresos y retiros como documentos (migración 3_documentos aplicada tras respaldo con pg_dump) | backend `46bc309`, frontend `a231bb8` |
+| 31/10/2026 | Limpieza de producción: se borraron los productos de prueba ROP-005 y APP-005 y sus 15 registros de historial (autorizado; respaldo `respaldo-smi-20261031-antes-borrar-pruebas.dump`) | — |
 
 ## Verificaciones previas (30/10/2026, solo lectura)
 
@@ -126,7 +128,7 @@ Sin cambios en la base de datos.
 
 **Pruebas:** backend 29 de 29 (22 de integración, 7 unitarias); frontend 18 de 18; navegador 25 de 25.
 
-## Fase D2 · Ingresos y retiros como documentos (31/10/2026, probada en `smi_pruebas`, pendiente de desplegar)
+## Fase D2 · Ingresos y retiros como documentos (31/10/2026, desplegada)
 
 **Base de datos:** migración `3_documentos`, solo aditiva: tablas `Documento` y `DocumentoLinea`, y la columna opcional `Historial.documentoId`. No modifica ni borra datos.
 
@@ -152,9 +154,33 @@ Sin cambios en la base de datos.
 
 **Pruebas:** backend 33 de 33 (25 de integración, 8 unitarias); frontend 22 de 22; navegador 25 de 25, más el comprobante impreso a PDF y revisado.
 
+## Fase D3 · Solicitudes SBO (31/10/2026, EN PRUEBAS: falta que la suite del backend pase completa y la prueba en navegador; sin desplegar)
+
+**Base de datos:** migración aditiva `4_sbo_vencimiento`: agrega el estado `VENCIDA` y la columna opcional `Solicitud.fecha_vencimiento`.
+
+**Backend**
+- Código automático `SBO-0001`, `GET /solicitudes/siguiente-codigo` y reintento si dos solicitudes se crean a la vez.
+- Lista paginada con filtros: estado o en curso, organización, alistador, fechas, texto, atrasadas y por vencer. Trae el resumen de atrasadas y por vencer.
+- Campos calculados: atrasada, días sin movimiento, vencimiento, tiempos y meta de alistamiento, y por ítem la referencia `SBO-0001-<código>`, lo reservado y lo despachado.
+- Vencimiento automático a los 30 días sin movimiento (libera la reserva), aviso 5 días antes y acción **Renovar**. Parámetros configurables.
+- Nota obligatoria en el alistamiento parcial.
+- `GET /solicitudes/codigo/:codigo` y `GET /version` (público).
+- Tarea diaria de GitHub Actions que despierta el servidor (`.github/workflows/despertar.yml`).
+
+**Frontend**
+- "Solicitudes SBO" dividida en formulario, detalle y lista (`src/pages/solicitudes/`).
+- Formulario: código sugerido y aviso cuando se pide más de lo libre (se puede guardar, no aprobar).
+- Lista con filtros e insignias **Atrasada** y **Vence en N días**.
+- Detalle: tabla solicitado / reservado / alistado / despachado, avisos, tiempos, nota (obligatoria si el alistamiento es parcial), botón Renovar y línea de tiempo.
+- Remisión imprimible con firmas (`/solicitudes/:codigo/remision`).
+- En el historial, el código de una SBO abre su detalle.
+
+**Codificación de productos:** propuesta aprobada en `docs/CODIFICACION.md` (formato `001-RCM-B`, con el estado del objeto en el sufijo). Se implementa en una subfase propia.
+
 ## Pendiente (en orden)
 
-- **D3** Solicitudes SBO.
+- **Codificación de productos** (`docs/CODIFICACION.md`).
+
 - **D4** Dashboard.
 - **E** Novedades y trazabilidad.
 - **F** Indicadores.

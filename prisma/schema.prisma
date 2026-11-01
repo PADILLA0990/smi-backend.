@@ -56,6 +56,7 @@ enum EstadoSolicitud {
   ALISTADA
   DESPACHADA
   CANCELADA
+  VENCIDA // 30 días (configurable) sin movimiento: libera la reserva
 }
 
 model Solicitud {
@@ -75,6 +76,7 @@ model Solicitud {
   fecha_fin_alistamiento    DateTime?
   fecha_despacho            DateTime?
   fecha_cancelacion         DateTime?
+  fecha_vencimiento         DateTime?
   items                     SolicitudItem[]
   eventos                   SolicitudEvento[]
 

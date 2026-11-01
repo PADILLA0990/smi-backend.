@@ -13,7 +13,7 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - `npm run verificar [-- --api <URL>]`: consistencia historial ↔ stock, solo lectura.
 
 ## Estructura
-- `index.js`: solo arranca el servidor. `app.js`: middlewares (helmet, CORS, cookies), rutas y manejo de errores.
+- `index.js`: arranca el servidor. `app.js`: middlewares (helmet, CORS, cookies), rutas y manejo de errores.
 - `lib/config.js`: variables de entorno con valores por defecto.
 - `auth/`: login, refresh, logout y cambio de contraseña (`routes.js`), `autenticar` y `autorizar` (`middleware.js`), matriz de permisos (`permisos.js`), bcrypt y JWT (`credenciales.js`).
 - `usuarios/routes.js`: gestión de usuarios (Administrador).
@@ -25,7 +25,10 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - `historial/routes.js`: historial con filtros y paginación (`?pagina=`); sin `pagina` devuelve todo.
 - `documentos/routes.js`: documentos de ingreso y salida de varias líneas en una transacción (`ING-0001`, `SAL-0001`). Cada condición tiene su propio código.
 - `lib/movimientos.js`: crear producto, sumar y retirar stock con su historial. Lo comparten `productos/routes.js` y los documentos; el detalle conserva el formato que lee el verificador.
-- `solicitudes/`: SBO (`estados.js` es la máquina de estados).
+- `solicitudes/`: SBO (`estados.js` es la máquina de estados; `vencer` es solo del sistema y `renovar` no cambia el estado).
+- `lib/solicitudes.js`: código `SBO-0001`, campos calculados (atrasada, vencimiento, tiempos, referencia por línea), lista paginada y vencimiento automático (`revisarVencimientos`, con freno de 5 min; `SBO_REVISION_MS=0` en las pruebas).
+- `index.js` revisa vencimientos al arrancar y cada hora. `GET /version` (público) dice qué commit corre en Render: úsalo para confirmar un despliegue.
+- `.github/workflows/despertar.yml`: despierta Render todos los días a las 6:00 a. m. (plan gratuito).
 - `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`. Un producto agotado se conserva con 0 unidades.
 - `lib/errores.js`: errores con status y mensajes en español.
 - `scripts/verificar-consistencia.js`: lógica pura reutilizable para Conciliación.
@@ -38,7 +41,7 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - **Cualquier cambio en la base de producción requiere autorización explícita del usuario.**
   - Migraciones versionadas y aditivas en `prisma/migrations` (nunca `db push`). Se prueban primero con `migrate deploy` en `smi_pruebas`.
   - En producción, la primera vez se marca la línea base con `migrate resolve --applied 0_init`. Antes de aplicar se respalda con `pg_dump`.
-- Productos reales en producción: ROP-005 y APP-005. No tocarlos.
+- Producción quedó vacía el 31/10/2026: ROP-005 y APP-005 eran de prueba y se borraron con autorización (respaldo `respaldos/respaldo-smi-20261031-antes-borrar-pruebas.dump`). Todo dato que se cargue desde ahora es real.
 - Categoría, ubicación, motivo y organización siempre salen del catálogo (`resolverActivo`); nunca aceptar texto libre nuevo.
 - Hay testers usando producción: avisar al usuario 🔴 CERRADO antes de migrar o desplegar, y 🟢 ABIERTO cuando esté verificado.
 - Toda ruta nueva bajo `/api` necesita `autorizar('<permiso>')`; los permisos están en `auth/permisos.js`.

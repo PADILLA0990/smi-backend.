@@ -31,6 +31,13 @@ app.get('/', (req, res) => {
   res.send('API del Banco de Alimentos funcionando correctamente');
 });
 
+// Versión que está corriendo (pública): permite confirmar un despliegue en Render sin iniciar sesión.
+// RENDER_GIT_COMMIT lo define Render en cada despliegue.
+const ARRANQUE = new Date().toISOString();
+app.get('/version', (req, res) => {
+  res.json({ commit: (process.env.RENDER_GIT_COMMIT || 'local').slice(0, 7), arranque: ARRANQUE });
+});
+
 // --- Autenticación (login y refresco son públicos) ---
 app.use('/api/auth', authRoutes);
 

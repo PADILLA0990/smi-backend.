@@ -32,7 +32,11 @@ const tokens = {};
 async function limpiarDatosTest() {
   // Documentos de prueba (Fase D2): los registra un usuario TEST- o incluyen productos TEST-
   await prisma.documento.deleteMany({ where: { OR: [{ operario: { startsWith: 'TEST-' } }, { lineas: { some: { codigo_producto: { startsWith: 'TEST-' } } } }] } });
-  await prisma.solicitud.deleteMany({ where: { codigo_sbo: { startsWith: 'TEST-' } } });
+  // Solicitudes de prueba: código TEST- o creadas por un usuario TEST- (las de código automático SBO-0001…).
+  // Su historial va por el código de la SBO, así que se borra antes.
+  const solicitudesTest = await prisma.solicitud.findMany({ where: { OR: [{ codigo_sbo: { startsWith: 'TEST-' } }, { creado_por: { startsWith: 'TEST-' } }] }, select: { codigo_sbo: true } });
+  await prisma.historial.deleteMany({ where: { codigo_producto: { in: solicitudesTest.map(s => s.codigo_sbo) } } });
+  await prisma.solicitud.deleteMany({ where: { codigo_sbo: { in: solicitudesTest.map(s => s.codigo_sbo) } } });
   await prisma.historial.deleteMany({ where: { codigo_producto: { startsWith: 'TEST-' } } });
   await prisma.producto.deleteMany({ where: { codigo_producto: { startsWith: 'TEST-' } } });
   await prisma.usuario.deleteMany({ where: { usuario: { startsWith: 'TEST-' } } });
@@ -44,11 +48,21 @@ async function limpiarDatosTest() {
   await prisma.parametro.deleteMany(); // solo existe en el esquema de pruebas: vuelve a los valores por defecto
 }
 
-async function api(method, ruta, body, token = tokens.coord, extra = {}) {
+async function api(method, ruta, body, token = tokens.coord, extra = {}, reintento = true) {
   const headers = { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra };
   const r = await fetch(B + ruta, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
   let data = null;
   try { data = await r.json(); } catch { /* sin JSON */ }
+  // El token de acceso dura 15 min y la suite contra Supabase remoto puede tardar más:
+  // si un token de la suite venció, se inicia sesión de nuevo con ese usuario y se reintenta una vez
+  const clave = Object.keys(tokens).find(k => tokens[k] === token);
+  if (r.status === 401 && reintento && clave && /expir/i.test(data?.error || '')) {
+    const nuevo = await login(USUARIOS[clave].usuario);
+    if (nuevo.status === 200) {
+      tokens[clave] = nuevo.data.accessToken;
+      return api(method, ruta, body, tokens[clave], extra, false);
+    }
+  }
   return { status: r.status, data, headers: r.headers };
 }
 
@@ -69,7 +83,8 @@ before(async () => {
   await prisma.tercero.create({ data: { nombre: 'TEST-Donante-D2', tipo: 'DONANTE' } });
   await prisma.unidadManejo.create({ data: { nombre: 'TEST-Caja', factor: 12 } });
   servidor = spawn(process.execPath, [path.join(__dirname, '..', 'index.js')], {
-    env: { ...process.env, PORT: String(PUERTO) },
+    // SBO_REVISION_MS=0: revisa vencimientos en cada consulta, para poder probarlos
+    env: { ...process.env, PORT: String(PUERTO), SBO_REVISION_MS: '0' },
     stdio: 'ignore'
   });
   for (let i = 0; i < 60; i++) {
@@ -309,7 +324,7 @@ test('Grupo 1: cancelar desde ALISTADA libera la reserva', async () => {
 
 test('Despacho parcial: descuenta lo alistado y libera toda la reserva', async () => {
   r = await transicion(sbo2, 'aprobar');
-  check('SBO2 aprobada ahora que hay stock', r.status === 200);
+  check('SBO2 aprobada ahora que hay stock', r.status === 200, `${r.status} ${r.data?.error}`);
   r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-G-SBO3', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-G-001', cantidad_solicitada: 5 }] });
   const sbo3 = r.data.id;
   await transicion(sbo3, 'aprobar');
@@ -317,7 +332,10 @@ test('Despacho parcial: descuenta lo alistado y libera toda la reserva', async (
   check('Reservadas 1 + 5 = 6 de 8', p.cantidad_reservada === 6, `reservada=${p.cantidad_reservada}`);
   await transicion(sbo3, 'iniciar', { alistador: 'TEST-op2' });
   const itemId = (await api('GET', `/solicitudes/${sbo3}`)).data.items[0].id;
-  await transicion(sbo3, 'finalizar', { cantidades: { [itemId]: 3 } });
+  r = await transicion(sbo3, 'finalizar', { cantidades: { [itemId]: 3 } });
+  check('Fase D3: alistamiento parcial sin nota → 400', r.status === 400 && /nota/i.test(r.data.error), r.data?.error);
+  r = await transicion(sbo3, 'finalizar', { cantidades: { [itemId]: 3 }, nota: 'Dos unidades estaban rotas' });
+  check('Fase D3: alistamiento parcial con nota', r.status === 200 && r.data.estado === 'ALISTADA' && r.data.eventos.at(-1).nota === 'Dos unidades estaban rotas', r.data?.error);
   r = await transicion(sbo3, 'despachar');
   p = await producto('TEST-G-001');
   check('Despacho de 3 de 5: stock 8-3=5, reserva queda solo la de SBO2 (1)', r.data.estado === 'DESPACHADA' && p.cantidad === 5 && p.cantidad_reservada === 1, `cantidad=${p.cantidad} reservada=${p.cantidad_reservada}`);
@@ -618,4 +636,106 @@ test('Fase D2: consulta de documentos', async () => {
   const e1 = await producto('TEST-E-001');
   r = await api('GET', `/productos/${e1.id}/kardex`);
   check('Kardex del producto creado por documento: coincide y sin avisos', r.data.coincide && r.data.avisos.length === 0 && r.data.movimientos.every(m => m.documento), JSON.stringify(r.data.avisos));
+});
+
+// ======================= Fase D3: solicitudes SBO =======================
+
+const DIA_MS = 24 * 60 * 60 * 1000;
+// Simula que la solicitud no se mueve desde hace N días (corre hacia atrás la creación y sus eventos)
+async function envejecer(id, dias) {
+  const fecha = new Date(Date.now() - dias * DIA_MS);
+  await prisma.solicitud.update({ where: { id }, data: { fecha_solicitud: fecha } });
+  await prisma.solicitudEvento.updateMany({ where: { solicitudId: id }, data: { fecha } });
+}
+
+test('Fase D3: código automático y referencia por línea', async () => {
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-S-001', descripcion: 'Cobija D3', categoria: 'TEST-Cat', cantidad: 50 }, tokens.op);
+  check('Producto para las pruebas de SBO', r.status === 201 || r.status === 200, r.data?.error);
+  r = await api('GET', '/solicitudes/siguiente-codigo', undefined, tokens.op);
+  const sugerido = r.data.codigo;
+  check('Código sugerido con formato SBO-0001', r.status === 200 && /^SBO-\d{4,}$/.test(sugerido), sugerido);
+  r = await api('GET', '/solicitudes/siguiente-codigo', undefined, tokens.consulta);
+  check('Consulta no pide códigos → 403', r.status === 403);
+  r = await api('POST', '/solicitudes', { beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-S-001', cantidad_solicitada: 2 }, { codigo_producto: 'TEST-S-001', cantidad_solicitada: 1 }] }, tokens.op);
+  const auto = r.data;
+  check('Sin código se asigna el sugerido', r.status === 201 && auto.codigo_sbo === sugerido, `${auto?.codigo_sbo} vs ${sugerido}`);
+  check('Referencia por línea SBO-xxxx-<código>, -2 si se repite', auto.items[0].referencia === `${sugerido}-TEST-S-001` && auto.items[1].referencia === `${sugerido}-TEST-S-001-2`, auto.items.map(i => i.referencia).join());
+  r = await api('GET', '/solicitudes/siguiente-codigo', undefined, tokens.op);
+  check('El siguiente código avanza', Number(r.data.codigo.slice(4)) === Number(sugerido.slice(4)) + 1, r.data.codigo);
+  r = await api('POST', '/solicitudes', { codigo_sbo: sugerido, beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-S-001', cantidad_solicitada: 1 }] }, tokens.op);
+  check('Código repetido escrito a mano → 409', r.status === 409, r.data?.error);
+  r = await api('GET', `/solicitudes/codigo/${sugerido}`, undefined, tokens.consulta);
+  check('Detalle por código', r.status === 200 && r.data.id === auto.id && r.data.eventos.length === 1);
+  r = await api('GET', '/solicitudes/codigo/NO-EXISTE', undefined, tokens.consulta);
+  check('Código inexistente → 404', r.status === 404);
+});
+
+test('Fase D3: lista paginada con filtros, atrasada y tiempos', async () => {
+  const org = (await api('GET', '/catalogos/organizaciones')).data.find(o => o.nombre === 'TEST-Org');
+  const hace10 = new Date(Date.now() - 10 * DIA_MS).toISOString().slice(0, 10);
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-D3-ATR', beneficiario: 'TEST-Org', fecha_requerida: hace10, items: [{ codigo_producto: 'TEST-S-001', cantidad_solicitada: 4 }] }, tokens.op);
+  const atrasada = r.data;
+  check('SBO con fecha requerida vencida queda atrasada', r.status === 201 && atrasada.atrasada === true && atrasada.activa === true, JSON.stringify({ atrasada: atrasada?.atrasada, error: r.data?.error }));
+  r = await api('GET', '/solicitudes?pagina=1&q=TEST-D3-ATR', undefined, tokens.consulta);
+  check('Búsqueda por código en la lista paginada', r.status === 200 && r.data.total === 1 && r.data.datos[0].codigo_sbo === 'TEST-D3-ATR' && !('eventos' in r.data.datos[0]), JSON.stringify(r.data).slice(0, 200));
+  r = await api('GET', `/solicitudes?pagina=1&atrasada=1&organizacionId=${org.id}`);
+  check('Filtro de atrasadas y resumen', r.data.datos.some(s => s.codigo_sbo === 'TEST-D3-ATR') && r.data.datos.every(s => s.atrasada) && r.data.resumen.atrasadas >= 1, JSON.stringify(r.data.resumen));
+  r = await api('GET', '/solicitudes?pagina=1&q=TEST-S-001&estado=ACTIVAS');
+  check('Filtro por producto y estados activos', r.data.total >= 2 && r.data.datos.every(s => s.activa));
+  r = await api('GET', '/solicitudes?pagina=1&estado=INVENTADO');
+  check('Estado no válido → 400', r.status === 400);
+  await transicion(atrasada.id, 'aprobar');
+  await transicion(atrasada.id, 'iniciar', { alistador: 'TEST-op2' });
+  r = await api('GET', `/solicitudes?pagina=1&alistador=test-op2&q=TEST-D3-ATR`);
+  check('Filtro por alistador', r.data.total === 1);
+  await transicion(atrasada.id, 'finalizar');
+  r = await transicion(atrasada.id, 'despachar');
+  check('Despachada: deja de estar atrasada y trae tiempos', r.data.estado === 'DESPACHADA' && r.data.atrasada === false && r.data.tiempos.total_min !== null && r.data.tiempos.alistamiento_min !== null && r.data.items[0].cantidad_despachada === 4, JSON.stringify(r.data.tiempos));
+});
+
+test('Fase D3: aviso, renovación y vencimiento por falta de movimiento', async () => {
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-D3-VEN', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-S-001', cantidad_solicitada: 5 }] }, tokens.op);
+  const ven = r.data.id;
+  await transicion(ven, 'aprobar');
+  p = await producto('TEST-S-001');
+  const reservadaAntes = p.cantidad_reservada;
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-D3-AVI', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-S-001', cantidad_solicitada: 1 }] }, tokens.op);
+  const avi = r.data.id;
+  check('Recién creada: no está por vencer y no ofrece renovar', r.data.por_vencer === false && r.data.dias_para_vencer === 30 && !r.data.acciones.includes('renovar'), JSON.stringify({ d: r.data.dias_para_vencer, a: r.data.acciones }));
+
+  await envejecer(avi, 27);
+  r = await api('GET', `/solicitudes/${avi}`);
+  check('A 3 días de vencer: aviso y botón renovar para el coordinador', r.data.por_vencer === true && r.data.dias_para_vencer === 3 && r.data.acciones.includes('renovar'), JSON.stringify({ d: r.data.dias_para_vencer, a: r.data.acciones }));
+  r = await api('GET', `/solicitudes/${avi}`, undefined, tokens.op);
+  check('El operario no ve renovar', !r.data.acciones.includes('renovar'));
+  r = await transicion(avi, 'renovar', {}, tokens.op);
+  check('Operario no renueva → 403', r.status === 403);
+  r = await api('GET', '/solicitudes?pagina=1&porVencer=1');
+  check('Filtro de por vencer', r.data.datos.some(s => s.id === avi) && r.data.datos.every(s => s.por_vencer));
+  r = await transicion(avi, 'renovar');
+  check('Renovar: mismo estado, conteo reiniciado y evento', r.status === 200 && r.data.estado === 'CREADA' && r.data.por_vencer === false && r.data.dias_para_vencer === 30 && r.data.eventos.length === 2, JSON.stringify({ s: r.status, e: r.data?.error, d: r.data?.dias_para_vencer }));
+
+  r = await transicion(ven, 'vencer');
+  check('Vencer por la API no está permitido → 400', r.status === 400, r.data?.error);
+  await envejecer(ven, 31);
+  r = await api('GET', `/solicitudes/${ven}`, undefined, tokens.consulta);
+  p = await producto('TEST-S-001');
+  check('A los 30 días sin movimiento queda VENCIDA y libera la reserva', r.data.estado === 'VENCIDA' && r.data.fecha_vencimiento && r.data.acciones.length === 0 && p.cantidad_reservada === reservadaAntes - 5, `estado=${r.data.estado} reservada=${p.cantidad_reservada} antes=${reservadaAntes}`);
+  check('El evento de vencimiento lo registra el sistema', r.data.eventos.at(-1).usuario === 'sistema' && r.data.eventos.at(-1).estado_nuevo === 'VENCIDA');
+  h = await historial('TEST-D3-VEN');
+  check('Historial SBO VENCIDA', h.some(x => x.accion === 'SBO VENCIDA' && x.operario === 'sistema'), h.map(x => x.accion).join());
+  r = await transicion(ven, 'cancelar');
+  check('Una vencida ya no se puede cancelar → 400', r.status === 400);
+  r = await api('GET', '/solicitudes?pagina=1&estado=VENCIDA&q=TEST-D3');
+  check('Filtro por estado VENCIDA', r.data.total === 1 && r.data.datos[0].codigo_sbo === 'TEST-D3-VEN');
+});
+
+test('Fase D3: parámetros de vencimiento y versión pública', async () => {
+  r = await api('GET', '/parametros', undefined, tokens.consulta);
+  check('Parámetros de vencimiento con sus valores por defecto', r.data.find(x => x.clave === 'dias_vencimiento_sbo').valor === 30 && r.data.find(x => x.clave === 'dias_aviso_vencimiento_sbo').valor === 5);
+  r = await api('PUT', '/parametros', { dias_aviso_vencimiento_sbo: 30 }, tokens.coord);
+  check('Aviso igual o mayor que el vencimiento → 400', r.status === 400, r.data?.error);
+  r = await fetch(`http://localhost:${PUERTO}/version`);
+  const version = await r.json();
+  check('GET /version es público', r.status === 200 && version.commit && version.arranque, JSON.stringify(version));
 });

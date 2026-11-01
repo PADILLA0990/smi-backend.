@@ -8,20 +8,27 @@ const { registrarHistorial } = require('../lib/historial');
 const { autorizar } = require('../auth/middleware');
 const { resolverActivo } = require('../lib/catalogos');
 const { tienePermiso, PERMISO_TRANSICION, ROLES_ALISTADORES } = require('../auth/permisos');
+const { leerParametros } = require('../lib/catalogos');
+const { ESTADOS_CON_RESERVA, siguienteCodigo, describirSolicitud, listarSolicitudes, revisarVencimientos } = require('../lib/solicitudes');
 
 const router = express.Router();
 
 // Las transacciones van contra Supabase remoto: damos margen extra al tiempo límite
 const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
 
-// Estados en los que la solicitud tiene stock reservado
-const ESTADOS_CON_RESERVA = ['APROBADA', 'EN_ALISTAMIENTO', 'ALISTADA'];
+const INCLUIR_DETALLE = { items: true, eventos: { orderBy: { fecha: 'asc' } } };
 
-// Agrega las acciones válidas para el estado Y permitidas al rol, para que el frontend sepa qué botones mostrar
-const conAcciones = (solicitud, usuario) => ({
-  ...solicitud,
-  acciones: accionesDisponibles(solicitud.estado).filter(a => tienePermiso(usuario.rol, PERMISO_TRANSICION[a]))
-});
+// Agrega los campos calculados (Fase D3) y las acciones válidas para el estado Y permitidas al rol,
+// para que el frontend sepa qué botones mostrar. Renovar solo aparece dentro del aviso de vencimiento.
+const conAcciones = (solicitud, usuario, parametros) => {
+  const descrita = describirSolicitud(solicitud, parametros);
+  return {
+    ...descrita,
+    acciones: accionesDisponibles(solicitud.estado)
+      .filter(a => tienePermiso(usuario.rol, PERMISO_TRANSICION[a]))
+      .filter(a => a !== 'renovar' || descrita.por_vencer)
+  };
+};
 
 // Valida los ítems recibidos y completa la descripción desde el inventario
 async function prepararItems(tx, items) {
@@ -76,52 +83,88 @@ router.param('id', (req, res, next, id) => {
   next();
 });
 
-// 1. Listar solicitudes (filtro opcional por estado)
+// 1. Listar solicitudes.
+//    Con ?pagina= devuelve { datos, total, pagina, porPagina, resumen } con filtros (estado, ACTIVAS,
+//    organizacionId, alistador, desde, hasta, q, atrasada, porVencer). Sin pagina, el arreglo completo.
 router.get('/', autorizar('inventario:ver'), async (req, res) => {
   try {
     const { estado } = req.query;
-    if (estado && !Object.values(EstadoSolicitud).includes(estado)) {
+    if (estado && estado !== 'ACTIVAS' && !Object.values(EstadoSolicitud).includes(estado)) {
       return res.status(400).json({ error: `Estado inválido: ${estado}` });
     }
-    const solicitudes = await prisma.solicitud.findMany({
-      where: estado ? { estado } : undefined,
-      include: { items: true },
-      orderBy: { fecha_solicitud: 'desc' }
-    });
-    res.json(solicitudes.map(s => conAcciones(s, req.usuario)));
+    await revisarVencimientos(prisma);
+    if (req.query.pagina !== undefined) {
+      return res.json(await listarSolicitudes(prisma, req.query));
+    }
+    const [solicitudes, parametros] = await Promise.all([
+      prisma.solicitud.findMany({
+        where: estado ? { estado } : undefined,
+        include: { items: true, eventos: { select: { fecha: true } } },
+        orderBy: { fecha_solicitud: 'desc' }
+      }),
+      leerParametros(prisma)
+    ]);
+    // Sin los eventos: la lista completa conserva su forma de antes, más los campos calculados
+    res.json(solicitudes.map(s => {
+      const { eventos, ...resto } = conAcciones(s, req.usuario, parametros);
+      return resto;
+    }));
   } catch (error) {
     manejarError(res, error, 'Error al obtener las solicitudes');
   }
 });
 
-// 2. Detalle de una solicitud con ítems y trazabilidad de estados
-router.get('/:id', autorizar('inventario:ver'), async (req, res) => {
+// 1b. Código que se asignará a la próxima solicitud (SBO-0001, SBO-0002…)
+router.get('/siguiente-codigo', autorizar('sbo:crear'), async (req, res) => {
   try {
-    const solicitud = await prisma.solicitud.findUnique({
-      where: { id: Number(req.params.id) },
-      include: { items: true, eventos: { orderBy: { fecha: 'asc' } } }
-    });
+    res.json({ codigo: await siguienteCodigo(prisma) });
+  } catch (error) {
+    manejarError(res, error, 'Error al calcular el código');
+  }
+});
+
+async function responderDetalle(req, res, where) {
+  try {
+    await revisarVencimientos(prisma);
+    const [solicitud, parametros] = await Promise.all([
+      prisma.solicitud.findUnique({ where, include: INCLUIR_DETALLE }),
+      leerParametros(prisma)
+    ]);
     if (!solicitud) {
       return res.status(404).json({ error: 'Solicitud no encontrada.' });
     }
-    res.json(conAcciones(solicitud, req.usuario));
+    res.json(conAcciones(solicitud, req.usuario, parametros));
   } catch (error) {
     manejarError(res, error, 'Error al obtener la solicitud');
   }
-});
+}
+
+// 2. Detalle por código (lo usan la remisión y los enlaces del historial)
+router.get('/codigo/:codigo', autorizar('inventario:ver'), (req, res) =>
+  responderDetalle(req, res, { codigo_sbo: String(req.params.codigo) }));
+
+// 2b. Detalle de una solicitud con ítems y trazabilidad de estados
+router.get('/:id', autorizar('inventario:ver'), (req, res) =>
+  responderDetalle(req, res, { id: Number(req.params.id) }));
 
 // 3. Crear una solicitud SBO con sus ítems
 router.post('/', autorizar('sbo:crear'), async (req, res) => {
   try {
-    const { codigo_sbo, fecha_requerida, observaciones, items } = req.body;
+    const { fecha_requerida, observaciones, items } = req.body;
     const creado_por = req.usuario.usuario;
+    // Sin código, el sistema asigna el siguiente SBO-0001; uno escrito a mano debe ser único
+    const codigoEnviado = typeof req.body.codigo_sbo === 'string' ? req.body.codigo_sbo.trim() : '';
+    if (codigoEnviado.length > 40) {
+      return res.status(400).json({ error: 'El código SBO admite máximo 40 caracteres.' });
+    }
     // El beneficiario es una organización del catálogo (por id o por nombre)
     const beneficiarioEnviado = req.body.organizacionId ?? req.body.beneficiario;
-    if (!codigo_sbo || beneficiarioEnviado === undefined || beneficiarioEnviado === null || String(beneficiarioEnviado).trim() === '') {
-      return res.status(400).json({ error: 'Código SBO y beneficiario son obligatorios.' });
+    if (beneficiarioEnviado === undefined || beneficiarioEnviado === null || String(beneficiarioEnviado).trim() === '') {
+      return res.status(400).json({ error: 'La organización beneficiaria es obligatoria.' });
     }
 
-    const solicitud = await prisma.$transaction(async (tx) => {
+    const crear = () => prisma.$transaction(async (tx) => {
+      const codigo_sbo = codigoEnviado || await siguienteCodigo(tx);
       const organizacion = await resolverActivo(tx, 'organizacion', beneficiarioEnviado, { etiqueta: 'La organización beneficiaria' });
       const beneficiario = organizacion.nombre;
       const itemsPreparados = await prepararItems(tx, items);
@@ -136,14 +179,25 @@ router.post('/', autorizar('sbo:crear'), async (req, res) => {
           items: { create: itemsPreparados },
           eventos: { create: { estado_nuevo: 'CREADA', usuario: creado_por } }
         },
-        include: { items: true }
+        include: INCLUIR_DETALLE
       });
       await registrarHistorial(tx, codigo_sbo, 'SBO CREADA', req.usuario,
         `Solicitud para ${beneficiario} con ${itemsPreparados.length} ítem(s)`);
       return nueva;
     }, OPCIONES_TX);
 
-    res.status(201).json(conAcciones(solicitud, req.usuario));
+    // Dos solicitudes creadas a la vez pueden calcular el mismo número: se reintenta con el siguiente
+    let solicitud;
+    for (let intento = 1; ; intento++) {
+      try {
+        solicitud = await crear();
+        break;
+      } catch (error) {
+        if (codigoEnviado || error.code !== 'P2002' || intento === 3) throw error;
+      }
+    }
+
+    res.status(201).json(conAcciones(solicitud, req.usuario, await leerParametros(prisma)));
   } catch (error) {
     manejarError(res, error, 'Error al crear la solicitud');
   }
@@ -166,11 +220,11 @@ router.put('/:id/items', autorizar('sbo:crear'), async (req, res) => {
       return tx.solicitud.update({
         where: { id },
         data: { items: { create: itemsPreparados } },
-        include: { items: true }
+        include: INCLUIR_DETALLE
       });
     }, OPCIONES_TX);
 
-    res.json(conAcciones(solicitud, req.usuario));
+    res.json(conAcciones(solicitud, req.usuario, await leerParametros(prisma)));
   } catch (error) {
     manejarError(res, error, 'Error al actualizar los ítems');
   }
@@ -178,6 +232,7 @@ router.put('/:id/items', autorizar('sbo:crear'), async (req, res) => {
 
 // 5. Ejecutar una transición de la máquina de estados
 //    Body: { accion, alistador?, cantidades?: { [itemId]: n }, nota? }
+//    renovar deja el estado igual y reinicia el conteo de vencimiento; vencer es solo del sistema.
 //    Cada acción exige su permiso (auth/permisos.js: PERMISO_TRANSICION)
 router.post('/:id/transicion', async (req, res) => {
   try {
@@ -199,7 +254,7 @@ router.post('/:id/transicion', async (req, res) => {
         throw new StockError(400, error);
       }
 
-      const datos = { estado: transicion.hacia, [transicion.fecha]: new Date() };
+      const datos = { estado: transicion.hacia, ...(transicion.fecha ? { [transicion.fecha]: new Date() } : {}) };
 
       const solicitadas = totalesPorProducto(actual.items, 'cantidad_solicitada');
 
@@ -242,6 +297,14 @@ router.post('/:id/transicion', async (req, res) => {
         if (totalAlistado === 0) {
           throw new StockError(400, 'No se alistó ningún producto. Si no hay nada que despachar, cancele la solicitud.');
         }
+        // Alistamiento parcial: la nota es obligatoria (en la Fase E se volverá una novedad)
+        const parcial = actual.items.some(item => {
+          const enviada = cantidades[item.id];
+          return enviada !== undefined && Number(enviada) < item.cantidad_solicitada;
+        });
+        if (parcial && (typeof nota !== 'string' || nota.trim().length < 5)) {
+          throw new StockError(400, 'Alistamiento parcial: explique en la nota por qué faltan unidades (mínimo 5 caracteres).');
+        }
       }
 
       if (accion === 'despachar') {
@@ -264,16 +327,18 @@ router.post('/:id/transicion', async (req, res) => {
       await tx.solicitudEvento.create({
         data: { solicitudId: id, estado_anterior: actual.estado, estado_nuevo: transicion.hacia, usuario, nota }
       });
-      await registrarHistorial(tx, actual.codigo_sbo, `SBO ${transicion.hacia}`, req.usuario,
-        nota || `${actual.estado} → ${transicion.hacia}${datos.alistador ? ` (alistador: ${datos.alistador})` : ''}`);
+      if (accion === 'renovar') {
+        await registrarHistorial(tx, actual.codigo_sbo, 'SBO RENOVADA', req.usuario,
+          nota || `Renovada en ${actual.estado}: se reinicia el conteo de vencimiento`);
+      } else {
+        await registrarHistorial(tx, actual.codigo_sbo, `SBO ${transicion.hacia}`, req.usuario,
+          nota || `${actual.estado} → ${transicion.hacia}${datos.alistador ? ` (alistador: ${datos.alistador})` : ''}`);
+      }
 
-      return tx.solicitud.findUnique({
-        where: { id },
-        include: { items: true, eventos: { orderBy: { fecha: 'asc' } } }
-      });
+      return tx.solicitud.findUnique({ where: { id }, include: INCLUIR_DETALLE });
     }, OPCIONES_TX);
 
-    res.json(conAcciones(solicitud, req.usuario));
+    res.json(conAcciones(solicitud, req.usuario, await leerParametros(prisma)));
   } catch (error) {
     manejarError(res, error, 'Error al cambiar el estado de la solicitud');
   }

@@ -17,6 +17,7 @@ const PERMISOS = {
   'sbo:aprobar': SUPERVISION,
   'sbo:despachar': SUPERVISION,
   'sbo:cancelar': SUPERVISION,
+  'sbo:renovar': SUPERVISION,       // reinicia el conteo de vencimiento
   'configuracion:gestionar': SUPERVISION, // catálogos y parámetros
   'usuarios:gestionar': ['ADMINISTRADOR']
 };
@@ -27,7 +28,8 @@ const PERMISO_TRANSICION = {
   iniciar: 'sbo:alistar',
   finalizar: 'sbo:alistar',
   despachar: 'sbo:despachar',
-  cancelar: 'sbo:cancelar'
+  cancelar: 'sbo:cancelar',
+  renovar: 'sbo:renovar'
 };
 
 const ROLES_ALISTADORES = ['OPERARIO', 'COORDINADOR'];
