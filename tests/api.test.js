@@ -739,3 +739,32 @@ test('Fase D3: parámetros de vencimiento y versión pública', async () => {
   const version = await r.json();
   check('GET /version es público', r.status === 200 && version.commit && version.arranque, JSON.stringify(version));
 });
+
+test('Fase D4: resumen del Dashboard', async () => {
+  r = await fetch(`${B}/dashboard`);
+  check('Sin sesión → 401', r.status === 401);
+  r = await api('GET', '/dashboard', undefined, tokens.consulta);
+  check('Consulta ve el resumen', r.status === 200 && r.data.inventario && r.data.solicitudes && Array.isArray(r.data.por_categoria), JSON.stringify(r.data).slice(0, 200));
+  const antes = r.data;
+  check('Los estados de SBO vienen todos, en cero si no hay', Object.keys(antes.solicitudes.por_estado).length === 7 && antes.solicitudes.por_estado.VENCIDA >= 0);
+
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-DB-1', descripcion: 'Cobija Dashboard', categoria: 'Textiles', cantidad: 5, condicion: 'BUENO', stock_minimo: 50 });
+  check('Producto de prueba creado', r.status === 201, r.data?.error);
+  const hace5 = new Date(Date.now() - 5 * DIA_MS).toISOString().slice(0, 10);
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-DB-SBO', beneficiario: 'TEST-Org', fecha_requerida: hace5, items: [{ codigo_producto: 'TEST-DB-1', cantidad_solicitada: 2 }] });
+  check('SBO atrasada creada', r.status === 201, r.data?.error);
+  await transicion(r.data.id, 'aprobar');
+
+  r = await api('GET', '/dashboard');
+  const d = r.data;
+  const inv = d.inventario, inv0 = antes.inventario;
+  check('Inventario: suma producto, unidades, reserva y libres', inv.productos === inv0.productos + 1 && inv.unidades === inv0.unidades + 5 && inv.reservadas === inv0.reservadas + 2 && inv.libres === inv0.libres + 3, JSON.stringify({ inv, inv0 }));
+  check('Sin ubicar y bajo mínimo', inv.sin_ubicar === inv0.sin_ubicar + 1 && inv.bajo_minimo === inv0.bajo_minimo + 1);
+  const textiles = d.por_categoria.find(c => c.nombre === 'Textiles');
+  check('Unidades por categoría', textiles && textiles.unidades >= 5, JSON.stringify(d.por_categoria));
+  check('SBO por estado, activas y atrasadas', d.solicitudes.por_estado.APROBADA === antes.solicitudes.por_estado.APROBADA + 1 && d.solicitudes.activas === antes.solicitudes.activas + 1 && d.solicitudes.atrasadas === antes.solicitudes.atrasadas + 1);
+  check('La SBO atrasada aparece en las alertas', d.solicitudes.alertas.some(s => s.codigo_sbo === 'TEST-DB-SBO' && s.atrasada), JSON.stringify(d.solicitudes.alertas));
+  check('El producto aparece en las alertas de inventario', d.productos_alerta.some(p => p.codigo_producto === 'TEST-DB-1' && p.bajo_minimo && p.sin_ubicar), JSON.stringify(d.productos_alerta));
+  check('Último movimiento primero', d.ultimos_movimientos.length > 0 && d.ultimos_movimientos[0].codigo_producto === 'TEST-DB-SBO', d.ultimos_movimientos.map(m => m.codigo_producto + ' ' + m.accion).join(' | '));
+  check('Coincide con la lista del inventario', (await api('GET', '/productos?pagina=1&sinUbicar=1')).data.total === inv.sin_ubicar && (await api('GET', '/productos?pagina=1&bajoMinimo=1')).data.total === inv.bajo_minimo);
+});

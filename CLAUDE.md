@@ -29,6 +29,7 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - `lib/solicitudes.js`: código `SBO-0001`, campos calculados (atrasada, vencimiento, tiempos, referencia por línea), lista paginada y vencimiento automático (`revisarVencimientos`, con freno de 5 min; `SBO_REVISION_MS=0` en las pruebas).
 - `index.js` revisa vencimientos al arrancar y cada hora. `GET /version` (público) dice qué commit corre en Render: úsalo para confirmar un despliegue.
 - `.github/workflows/despertar.yml`: despierta Render todos los días a las 6:00 a. m. (plan gratuito).
+- `dashboard/routes.js` y `lib/dashboard.js`: `GET /api/dashboard`, el resumen del panel principal (Fase D4). Reutiliza las reglas del inventario y de las SBO para que los números coincidan con las listas.
 - `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`. Un producto agotado se conserva con 0 unidades.
 - `lib/errores.js`: errores con status y mensajes en español.
 - `scripts/verificar-consistencia.js`: lógica pura reutilizable para Conciliación.

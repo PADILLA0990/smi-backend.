@@ -243,6 +243,19 @@ Claves disponibles:
 - `lote_pequeno_max` (10);
 - `lote_mediano_max` (50).
 
+## Dashboard (Fase D4)
+
+| Método | Ruta | Permiso | Respuesta |
+|---|---|---|---|
+| GET | `/dashboard` | `inventario:ver` | `{ generado, inventario, por_categoria, bodega, solicitudes, productos_alerta, ultimos_movimientos }` |
+
+- `inventario`: `{ productos, unidades, reservadas, libres, sin_ubicar, bajo_minimo, agotados }`, solo productos activos. `sin_ubicar` y `bajo_minimo` coinciden con los filtros `?sinUbicar=1` y `?bajoMinimo=1` de `/productos`.
+- `por_categoria` y `bodega.por_zona`: `[{ nombre, productos, unidades }]` de productos con existencias, de mayor a menor.
+- `bodega`: además `ubicaciones_catalogo` (activas) y `ubicaciones_ocupadas` (con algún producto con existencias).
+- `solicitudes`: `{ por_estado: { CREADA: n, … }, activas, atrasadas, por_vencer, alertas: [{ id, codigo_sbo, beneficiario, estado, atrasada, por_vencer, dias_para_vencer, fecha_requerida }] }`. Antes de calcular revisa los vencimientos.
+- `productos_alerta`: hasta 6 `{ id, codigo_producto, descripcion, libre, bajo_minimo, sin_ubicar }`, primero los de bajo mínimo.
+- `ultimos_movimientos`: los 8 registros más recientes del historial.
+
 ## Ubicaciones para el Mapa de Bodega (solo lectura)
 
 | Método | Ruta | Permiso | Respuesta |

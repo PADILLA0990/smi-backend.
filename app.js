@@ -11,6 +11,7 @@ const productosRoutes = require('./productos/routes');
 const solicitudesRoutes = require('./solicitudes/routes');
 const historialRoutes = require('./historial/routes');
 const documentosRoutes = require('./documentos/routes');
+const dashboardRoutes = require('./dashboard/routes');
 const { router: catalogosRoutes } = require('./catalogos/routes');
 
 const app = express();
@@ -57,6 +58,9 @@ app.use('/api', historialRoutes);
 app.use('/api', documentosRoutes);
 
 app.use('/api/solicitudes', solicitudesRoutes);
+
+// Resumen del panel principal (Fase D4)
+app.use('/api', dashboardRoutes);
 
 // Catálogos, parámetros y ubicaciones (estas últimas las consume el Mapa de Bodega)
 app.use('/api', catalogosRoutes);

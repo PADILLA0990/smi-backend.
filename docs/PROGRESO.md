@@ -177,11 +177,17 @@ Sin cambios en la base de datos.
 
 **Codificación de productos:** propuesta aprobada en `docs/CODIFICACION.md` (formato `001-RCM-B`, con el estado del objeto en el sufijo). Se implementa en una subfase propia.
 
+## Fase D4: Dashboard (02/11/2026)
+
+- `GET /api/dashboard` reúne en una consulta los indicadores del panel, con las mismas reglas que las listas: unidades totales, libres y reservadas; productos sin ubicar, bajo mínimo y agotados; SBO por estado, en curso, atrasadas y por vencer.
+- Unidades por categoría y por zona, ubicaciones del catálogo ocupadas, alertas (SBO y productos, hasta 6 de cada tipo) y los 8 últimos movimientos.
+- El panel enlaza cada alerta a su lista ya filtrada: `/inventario?sinUbicar=1`, `/inventario?bajoMinimo=1`, `/solicitudes?atrasada=1`, `/solicitudes?porVencer=1` y `/solicitudes?estado=<ESTADO>`.
+- Sin cambios en la base de datos.
+
 ## Pendiente (en orden)
 
+- **Mapa de Bodega** (`/inventario-mapa`): ahora lo construimos nosotros; estanterías de 4 niveles, sin límites de capacidad.
 - **Codificación de productos** (`docs/CODIFICACION.md`).
-
-- **D4** Dashboard.
 - **E** Novedades y trazabilidad.
 - **F** Indicadores.
 - **G** Conciliación (requiere BD).
