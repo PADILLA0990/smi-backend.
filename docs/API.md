@@ -256,6 +256,18 @@ Claves disponibles:
 - `productos_alerta`: hasta 6 `{ id, codigo_producto, descripcion, libre, bajo_minimo, sin_ubicar }`, primero los de bajo mínimo.
 - `ultimos_movimientos`: los 8 registros más recientes del historial.
 
+## Mapa de Bodega y estanterías
+
+| Método | Ruta | Permiso | Respuesta |
+|---|---|---|---|
+| GET | `/mapa` | `inventario:ver` | `{ zonas: [{ zona, nombre, estanterias: [{ id, codigo, rack, calle, niveles, huecos, celdas: [{ codigo, nivel, hueco, productos, unidades }] }], areas: [{ codigo, nombre, productos, unidades }] }], fuera_de_estanterias, resumen }`. Las celdas van del nivel más alto al 1. Solo cuenta productos con unidades. |
+| GET | `/estanterias` | `inventario:ver` | `[{ id, codigo, zona, rack, calle, niveles, huecos, orden, activo, ubicaciones, productos }]` |
+| POST | `/estanterias` | `configuracion:gestionar` | `{ zona: "Z1", rack: "A", niveles: 1–6, huecos: 1–30, calle?, orden? }` → 201 y genera los huecos. Repetida → 409. |
+| PATCH | `/estanterias/:id` | `configuracion:gestionar` | `{ calle?, niveles?, huecos?, orden?, activo? }`. Zona y rack no cambian (400). Quitar o desactivar huecos con producto → 409 con los códigos. |
+| POST | `/estanterias/distribucion-inicial` | `configuracion:gestionar` | Crea lo que falte de la distribución inicial → `{ estanterias: [...], areas: [...] }`. |
+
+Los productos de `/mapa` traen `ubicacion` (su `codigo_estanteria` o, si no tiene, su `ubicacion_general`).
+
 ## Ubicaciones para el Mapa de Bodega (solo lectura)
 
 | Método | Ruta | Permiso | Respuesta |

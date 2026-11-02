@@ -30,6 +30,7 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - `index.js` revisa vencimientos al arrancar y cada hora. `GET /version` (público) dice qué commit corre en Render: úsalo para confirmar un despliegue.
 - `.github/workflows/despertar.yml`: despierta Render todos los días a las 6:00 a. m. (plan gratuito).
 - `dashboard/routes.js` y `lib/dashboard.js`: `GET /api/dashboard`, el resumen del panel principal (Fase D4). Reutiliza las reglas del inventario y de las SBO para que los números coincidan con las listas.
+- `estanterias/routes.js` y `lib/estanterias.js`: Mapa de Bodega (`GET /api/mapa`) y estanterías. Guardar una estantería genera sus huecos `Z1-A-2-04` como ubicaciones del catálogo (`Ubicacion.estanteriaId`). `npm run estanterias:iniciales` carga la distribución inicial (sin `--aplicar` solo muestra).
 - `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`. Un producto agotado se conserva con 0 unidades.
 - `lib/errores.js`: errores con status y mensajes en español.
 - `scripts/verificar-consistencia.js`: lógica pura reutilizable para Conciliación.
@@ -47,4 +48,4 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - Hay testers usando producción: avisar al usuario 🔴 CERRADO antes de migrar o desplegar, y 🟢 ABIERTO cuando esté verificado.
 - Toda ruta nueva bajo `/api` necesita `autorizar('<permiso>')`; los permisos están en `auth/permisos.js`.
 - Commits en español, solo cuando el usuario los pida; desplegar solo con autorización.
-- Fuera de alcance: escáner, la página del Mapa de Bodega (solo se exponen endpoints) y perecederos.
+- Fuera de alcance: escáner y perecederos. El Mapa de Bodega es nuestro desde el 02/11/2026 (sin capacidad ni porcentajes).

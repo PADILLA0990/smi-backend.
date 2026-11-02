@@ -100,6 +100,10 @@ router.patch('/catalogos/:catalogo/:id', autorizar('configuracion:gestionar'), a
       await verificarUnicos(tx, def, data, id, actual);
 
       if (req.params.catalogo === 'ubicaciones') {
+        // Los huecos de una estantería se administran desde Configuración → Estanterías
+        if (actual.estanteriaId && ((data.codigo && data.codigo !== actual.codigo) || 'activo' in data)) {
+          throw new StockError(409, `${actual.codigo} es un hueco de estantería: cámbielo desde Configuración → Estanterías.`);
+        }
         const cambiaCodigo = data.codigo && data.codigo !== actual.codigo;
         if (cambiaCodigo || data.activo === false) {
           const ocupada = await tx.producto.count({ where: enUbicacion(actual.codigo) });

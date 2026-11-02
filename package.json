@@ -10,7 +10,8 @@
     "test": "node --test --test-concurrency=1 \"tests/**/*.test.js\"",
     "test:unit": "node --test tests/consistencia.test.js",
     "dev:pruebas": "node --env-file=.env.pruebas index.js",
-    "usuarios:iniciales": "node scripts/crear-usuarios-iniciales.js"
+    "usuarios:iniciales": "node scripts/crear-usuarios-iniciales.js",
+    "estanterias:iniciales": "node scripts/crear-estanterias-iniciales.js"
   },
   "keywords": [],
   "author": "",

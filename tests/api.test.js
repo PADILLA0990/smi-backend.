@@ -45,6 +45,9 @@ async function limpiarDatosTest() {
     await prisma[modelo].deleteMany({ where: { nombre: { startsWith: 'TEST-' } } });
   }
   await prisma.ubicacion.deleteMany({ where: { codigo: { startsWith: 'TEST-' } } });
+  // Estantería de prueba del Mapa de Bodega: zona Z99 (el código de estantería no admite el prefijo TEST-)
+  await prisma.ubicacion.deleteMany({ where: { OR: [{ estanteria: { zona: 'Z99' } }, { codigo: { startsWith: 'Z99-' } }] } });
+  await prisma.estanteria.deleteMany({ where: { zona: 'Z99' } });
   await prisma.parametro.deleteMany(); // solo existe en el esquema de pruebas: vuelve a los valores por defecto
 }
 
@@ -767,4 +770,76 @@ test('Fase D4: resumen del Dashboard', async () => {
   check('El producto aparece en las alertas de inventario', d.productos_alerta.some(p => p.codigo_producto === 'TEST-DB-1' && p.bajo_minimo && p.sin_ubicar), JSON.stringify(d.productos_alerta));
   check('Último movimiento primero', d.ultimos_movimientos.length > 0 && d.ultimos_movimientos[0].codigo_producto === 'TEST-DB-SBO', d.ultimos_movimientos.map(m => m.codigo_producto + ' ' + m.accion).join(' | '));
   check('Coincide con la lista del inventario', (await api('GET', '/productos?pagina=1&sinUbicar=1')).data.total === inv.sin_ubicar && (await api('GET', '/productos?pagina=1&bajoMinimo=1')).data.total === inv.bajo_minimo);
+});
+
+test('Mapa de Bodega: estanterías, huecos generados y contenido del mapa', async () => {
+  r = await api('POST', '/estanterias', { zona: 'Z99', rack: 'T', niveles: 2, huecos: 3 }, tokens.op);
+  check('Operario no crea estanterías → 403', r.status === 403);
+  r = await api('POST', '/estanterias', { zona: 'Zona 1', rack: 'T', niveles: 2, huecos: 3 });
+  check('Zona con formato inválido → 400', r.status === 400, r.data?.error);
+  r = await api('POST', '/estanterias', { zona: 'z99', rack: 't', niveles: 9, huecos: 3 });
+  check('Niveles fuera de rango → 400', r.status === 400, r.data?.error);
+  r = await api('POST', '/estanterias', { zona: 'z99', rack: 't', niveles: 2, huecos: 3, calle: 'TEST-Calle' });
+  check('Crea la estantería Z99-T en mayúsculas', r.status === 201 && r.data.codigo === 'Z99-T', JSON.stringify(r.data));
+  const rack = r.data;
+  r = await api('POST', '/estanterias', { zona: 'Z99', rack: 'T', niveles: 1, huecos: 1 });
+  check('Estantería repetida → 409', r.status === 409);
+  r = await api('GET', '/ubicaciones', undefined, tokens.consulta);
+  const huecos = r.data.filter(u => u.codigo.startsWith('Z99-T-')).map(u => u.codigo).sort();
+  check('Genera 2 × 3 huecos Z99-T-n-0m', huecos.join() === 'Z99-T-1-01,Z99-T-1-02,Z99-T-1-03,Z99-T-2-01,Z99-T-2-02,Z99-T-2-03', huecos.join());
+
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-M-1', descripcion: 'Silla mapa', categoria: 'Textiles', cantidad: 4, condicion: 'BUENO' });
+  const prod = r.data.producto;
+  r = await api('PUT', `/productos/${prod.id}`, { codigo_estanteria: 'z99-t-2-03' }, tokens.op);
+  check('Reubicar a un hueco generado', r.status === 200 && r.data.codigo_estanteria === 'Z99-T-2-03' && r.data.ubicacion_general === 'Zona 99', JSON.stringify(r.data));
+
+  r = await api('GET', '/mapa', undefined, tokens.consulta);
+  const zona = r.data.zonas.find(z => z.zona === 'Z99');
+  const est = zona?.estanterias.find(e => e.codigo === 'Z99-T');
+  check('El mapa trae la zona y la estantería con sus 6 celdas, nivel de arriba primero', est && est.celdas.length === 6 && est.celdas[0].nivel === 2 && est.calle === 'TEST-Calle' && zona.nombre === 'Zona 99', JSON.stringify(est?.celdas?.map(c => c.codigo)));
+  const celda = est.celdas.find(c => c.codigo === 'Z99-T-2-03');
+  check('La celda muestra el producto y sus unidades', celda.productos.length === 1 && celda.productos[0].codigo_producto === 'TEST-M-1' && celda.unidades === 4);
+  check('Ya no está fuera de estanterías', !r.data.fuera_de_estanterias.some(p => p.codigo_producto === 'TEST-M-1') && r.data.resumen.huecos_ocupados >= 1);
+
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-M-2', descripcion: 'Mesa ingresada al hueco', categoria: 'Textiles', cantidad: 2, condicion: 'BUENO', ubicacion_general: 'Z99-T-1-02' });
+  check('Ingreso directo a un hueco', r.status === 201 && r.data.producto.ubicacion_general === 'Z99-T-1-02', r.data?.error);
+  r = await api('GET', '/productos?pagina=1&sinUbicar=1&q=TEST-M-');
+  check('Un producto en un hueco no cuenta como sin ubicar', r.data.total === 0, r.data.datos.map(p => p.codigo_producto).join());
+  r = await api('GET', '/mapa');
+  check('El mapa lo muestra en su hueco', r.data.zonas.find(z => z.zona === 'Z99').estanterias[0].celdas.find(c => c.codigo === 'Z99-T-1-02').productos.some(p => p.codigo_producto === 'TEST-M-2'));
+  r = await api('GET', '/dashboard');
+  check('El Dashboard tampoco lo cuenta sin ubicar', !r.data.productos_alerta.some(p => p.codigo_producto === 'TEST-M-2' && p.sin_ubicar));
+
+  r = await api('PATCH', `/estanterias/${rack.id}`, { huecos: 2 });
+  check('No deja quitar un hueco con producto → 409', r.status === 409 && r.data.error.includes('Z99-T-2-03') && r.data.error.includes('TEST-M-1'), r.data?.error);
+  r = await api('PATCH', `/estanterias/${rack.id}`, { activo: false });
+  check('No deja desactivar una estantería con producto → 409', r.status === 409);
+  r = await api('PATCH', `/estanterias/${rack.id}`, { rack: 'U' });
+  check('Zona y rack no se cambian → 400', r.status === 400);
+  const hueco = (await api('GET', '/catalogos/ubicaciones')).data.find(u => u.codigo === 'Z99-T-1-01');
+  r = await api('PATCH', `/catalogos/ubicaciones/${hueco.id}`, { activo: false });
+  check('Un hueco no se desactiva desde el catálogo → 409', r.status === 409, r.data?.error);
+
+  await api('PUT', `/productos/${prod.id}`, { codigo_estanteria: 'Z99-T-1-01' }, tokens.op);
+  r = await api('PATCH', `/estanterias/${rack.id}`, { huecos: 2, calle: '' });
+  check('Con el hueco vacío sí se reduce', r.status === 200 && r.data.huecos === 2 && r.data.calle === null, r.data?.error);
+  r = await api('GET', '/ubicaciones?todas=1');
+  const quitado = r.data.find(u => u.codigo === 'Z99-T-2-03');
+  check('El hueco quitado queda inactivo (no se borra)', quitado && quitado.activo === false);
+  r = await api('GET', '/estanterias', undefined, tokens.consulta);
+  const fila = r.data.find(e => e.codigo === 'Z99-T');
+  check('Lista de estanterías con huecos y productos', fila.ubicaciones === 4 && fila.productos === 2, JSON.stringify(fila));
+  r = await api('PATCH', `/estanterias/${rack.id}`, { huecos: 3 });
+  check('Al volver a ampliar, el hueco se reactiva', r.status === 200 && (await api('GET', '/ubicaciones')).data.some(u => u.codigo === 'Z99-T-2-03'));
+
+  r = await api('POST', '/estanterias/distribucion-inicial', {}, tokens.op);
+  check('Operario no carga la distribución → 403', r.status === 403);
+  r = await api('POST', '/estanterias/distribucion-inicial', {});
+  check('Distribución inicial', r.status === 201, r.data?.error);
+  r = await api('POST', '/estanterias/distribucion-inicial', {});
+  check('Cargarla otra vez no crea nada', r.status === 201 && r.data.estanterias.length === 0 && r.data.areas.length === 0, JSON.stringify(r.data));
+  r = await api('GET', '/mapa');
+  const z1 = r.data.zonas.find(z => z.zona === 'Z1');
+  const j = r.data.zonas.find(z => z.zona === 'Z2')?.estanterias.find(e => e.rack === 'J');
+  check('Zona 1 con racks A–I y áreas; rack J con 3 niveles', z1 && 'ABCDEFGHI'.split('').every(x => z1.estanterias.some(e => e.rack === x)) && z1.areas.some(a => a.codigo === 'Alistamiento 1') && j?.niveles === 3, JSON.stringify(z1?.estanterias.map(e => e.codigo)));
 });

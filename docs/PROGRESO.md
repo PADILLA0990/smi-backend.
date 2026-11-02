@@ -184,9 +184,15 @@ Sin cambios en la base de datos.
 - El panel enlaza cada alerta a su lista ya filtrada: `/inventario?sinUbicar=1`, `/inventario?bajoMinimo=1`, `/solicitudes?atrasada=1`, `/solicitudes?porVencer=1` y `/solicitudes?estado=<ESTADO>`.
 - Sin cambios en la base de datos.
 
+## Mapa de Bodega (02/11/2026)
+
+- Migración `5_estantes` (aditiva): tabla `Estanteria` y `Ubicacion.estanteriaId`.
+- Configuración → Estanterías: crear, editar (calle, niveles, huecos, orden) y desactivar racks. Al guardar se generan sus huecos `Z1-A-2-04`. Botón para cargar la distribución inicial (`npm run estanterias:iniciales` hace lo mismo).
+- `/inventario-mapa`: racks de cada zona como cuadrícula nivel × hueco (sin capacidad), áreas, panel de detalle con Reubicar, Kardex e Ingresar aquí, búsqueda "¿Dónde está?" y lista de productos fuera de estanterías.
+- "Ingresar aquí" abre el documento de ingreso con esa ubicación para los productos nuevos (`/movimientos?pestana=ingreso&ubicacion=`).
+
 ## Pendiente (en orden)
 
-- **Mapa de Bodega** (`/inventario-mapa`): ahora lo construimos nosotros; estanterías de 4 niveles, sin límites de capacidad.
 - **Codificación de productos** (`docs/CODIFICACION.md`).
 - **E** Novedades y trazabilidad.
 - **F** Indicadores.

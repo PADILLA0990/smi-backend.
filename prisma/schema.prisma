@@ -246,6 +246,28 @@ model Ubicacion {
   activo         Boolean  @default(true)
   creado_en      DateTime @default(now())
   actualizado_en DateTime @updatedAt
+  // Mapa de Bodega: hueco generado por una estantería (vacío en áreas como Recepción o Alistamiento)
+  estanteriaId   Int?
+  estanteria     Estanteria? @relation(fields: [estanteriaId], references: [id], onDelete: SetNull)
+
+  @@index([estanteriaId])
+}
+
+// Mapa de Bodega: rack abierto de N niveles (1 = abajo) por M huecos. Al guardarlo se generan sus
+// ubicaciones con código Z1-A-2-04 (zona-rack-nivel-hueco). Sin capacidad: el piso controla el espacio.
+model Estanteria {
+  id             Int         @id @default(autoincrement())
+  codigo         String      @unique // Z1-A
+  zona           String // Z1
+  rack           String // A
+  calle          String? // Nombre de la calle o pasillo (Koaj, Koller…)
+  niveles        Int
+  huecos         Int
+  orden          Int         @default(0)
+  activo         Boolean     @default(true)
+  creado_en      DateTime    @default(now())
+  actualizado_en DateTime    @updatedAt
+  ubicaciones    Ubicacion[]
 }
 
 model Parametro {
