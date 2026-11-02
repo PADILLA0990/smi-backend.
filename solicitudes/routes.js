@@ -10,13 +10,14 @@ const { resolverActivo } = require('../lib/catalogos');
 const { tienePermiso, PERMISO_TRANSICION, ROLES_ALISTADORES } = require('../auth/permisos');
 const { leerParametros } = require('../lib/catalogos');
 const { ESTADOS_CON_RESERVA, siguienteCodigo, describirSolicitud, listarSolicitudes, revisarVencimientos } = require('../lib/solicitudes');
+const { registrarNovedad, sustituirItem, devolverItem, registrarFaltantes } = require('../lib/novedades');
 
 const router = express.Router();
 
 // Las transacciones van contra Supabase remoto: damos margen extra al tiempo límite
 const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
 
-const INCLUIR_DETALLE = { items: true, eventos: { orderBy: { fecha: 'asc' } } };
+const INCLUIR_DETALLE = { items: { orderBy: { id: 'asc' } }, eventos: { orderBy: { fecha: 'asc' } }, novedades: { orderBy: { fecha: 'asc' }, include: { motivo: { select: { nombre: true } } } } };
 
 // Agrega los campos calculados (Fase D3) y las acciones válidas para el estado Y permitidas al rol,
 // para que el frontend sepa qué botones mostrar. Renovar solo aparece dentro del aviso de vencimiento.
@@ -305,6 +306,8 @@ router.post('/:id/transicion', async (req, res) => {
         if (parcial && (typeof nota !== 'string' || nota.trim().length < 5)) {
           throw new StockError(400, 'Alistamiento parcial: explique en la nota por qué faltan unidades (mínimo 5 caracteres).');
         }
+        // Fase E: cada ítem incompleto queda como novedad FALTANTE con la nota
+        if (parcial) await registrarFaltantes(tx, actual, actual.items, cantidades, nota, req.usuario);
       }
 
       if (accion === 'despachar') {
@@ -343,5 +346,29 @@ router.post('/:id/transicion', async (req, res) => {
     manejarError(res, error, 'Error al cambiar el estado de la solicitud');
   }
 });
+
+// 6. Fase E: novedades, sustitución y devolución. Responden la solicitud actualizada.
+//    novedades: { tipo: FALTANTE|DANADO|TALLA_NO_DISPONIBLE|OTRO, itemId, cantidad, descripcion, motivoId? }
+//    sustituir: { itemId, codigo_sustituto, descripcion }  (APROBADA o EN_ALISTAMIENTO)
+//    devolver:  { itemId, cantidad, descripcion }          (DESPACHADA: vuelve al stock)
+const accionesNovedad = [
+  ['novedades', 'sbo:alistar', registrarNovedad, 'Error al registrar la novedad'],
+  ['sustituir', 'sbo:alistar', sustituirItem, 'Error al sustituir el producto'],
+  ['devolver', 'movimientos:registrar', devolverItem, 'Error al registrar la devolución']
+];
+for (const [ruta, permiso, accion, mensaje] of accionesNovedad) {
+  router.post(`/:id/${ruta}`, autorizar(permiso), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const solicitud = await prisma.$transaction(async (tx) => {
+        await accion(tx, id, req.body || {}, req.usuario);
+        return tx.solicitud.findUnique({ where: { id }, include: INCLUIR_DETALLE });
+      }, OPCIONES_TX);
+      res.status(201).json(conAcciones(solicitud, req.usuario, await leerParametros(prisma)));
+    } catch (error) {
+      manejarError(res, error, mensaje);
+    }
+  });
+}
 
 module.exports = router;

@@ -37,6 +37,8 @@ async function limpiarDatosTest() {
     await prisma.historial.deleteMany({ where: { codigo_producto: { in: codificados } } });
     await prisma.producto.deleteMany({ where: { codigo_producto: { in: codificados } } });
   }
+  // Novedades de prueba (Fase E)
+  await prisma.novedad.deleteMany({ where: { OR: [{ codigo_producto: { startsWith: 'TEST-' } }, { usuario: { startsWith: 'TEST-' } }] } });
   // Documentos de prueba (Fase D2): los registra un usuario TEST- o incluyen productos TEST-
   await prisma.documento.deleteMany({ where: { OR: [{ operario: { startsWith: 'TEST-' } }, { lineas: { some: { codigo_producto: { startsWith: 'TEST-' } } } }] } });
   // Solicitudes de prueba: código TEST- o creadas por un usuario TEST- (las de código automático SBO-0001…).
@@ -915,4 +917,78 @@ test('Codificación 001-RCM-B: árbol, código sugerido y validación al crear',
   check('El árbol renombra la categoría anterior y crea sus niveles', renombrada?.nombre === 'TEST-Arbol' && renombrada.subcategorias.length === 2 && res.variantes === 1, JSON.stringify(res));
   res = await crearArbol(prisma, arbolTest);
   check('Cargarlo otra vez no crea nada', res.categorias.length === 0 && res.subcategorias === 0 && res.variantes === 0);
+});
+
+test('Fase E: novedades, sustitución, devolución y trazabilidad', async () => {
+  const cat = (await api('POST', '/catalogos/categorias', { nombre: 'TEST-CatE' })).data;
+  for (const [codigo, cantidad] of [['TEST-E-1', 10], ['TEST-E-2', 10], ['TEST-E-3', 1]]) {
+    r = await api('POST', '/productos', { codigo_producto: codigo, descripcion: `Producto ${codigo}`, categoriaId: cat.id, cantidad }, tokens.op);
+    assert.strictEqual(r.status, 201, r.data?.error);
+  }
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-E-SBO', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-E-1', cantidad_solicitada: 4 }, { codigo_producto: 'TEST-E-2', cantidad_solicitada: 3 }] }, tokens.op);
+  const id = r.data.id;
+  const [it1, it2] = r.data.items;
+  r = await api('POST', `/solicitudes/${id}/novedades`, { tipo: 'DANADO', itemId: it1.id, cantidad: 1, descripcion: 'Caja mojada' }, tokens.op);
+  check('Novedad en CREADA → 400', r.status === 400, r.data?.error);
+  await transicion(id, 'aprobar');
+
+  // Sustitución: E-1 → E-3 sin stock suficiente (4 > 1) no deja nada a medias
+  r = await api('POST', `/solicitudes/${id}/sustituir`, { itemId: it1.id, codigo_sustituto: 'TEST-E-3', descripcion: 'Talla agotada' }, tokens.op);
+  p = await producto('TEST-E-1');
+  check('Sustituto sin stock → 400 y la reserva original sigue', r.status === 400 && p.cantidad_reservada === 4, `${r.status} reservada=${p.cantidad_reservada}`);
+  r = await api('POST', `/solicitudes/${id}/sustituir`, { itemId: it2.id, codigo_sustituto: 'TEST-E-1', descripcion: 'Equivalente disponible' }, tokens.consulta);
+  check('Consulta no sustituye → 403', r.status === 403);
+  r = await api('POST', `/solicitudes/${id}/sustituir`, { itemId: it2.id, codigo_sustituto: 'TEST-E-1', descripcion: 'Equivalente disponible' }, tokens.op);
+  const p1 = await producto('TEST-E-1'), p2 = await producto('TEST-E-2');
+  const item2 = r.data.items?.find(i => i.id === it2.id);
+  check('Sustituir: libera E-2 y reserva E-1', r.status === 201 && p1.cantidad_reservada === 7 && p2.cantidad_reservada === 0, `${r.status} ${r.data?.error} e1=${p1?.cantidad_reservada} e2=${p2?.cantidad_reservada}`);
+  check('El ítem queda con el sustituto y recuerda el original', item2.codigo_producto === 'TEST-E-1' && item2.codigo_original === 'TEST-E-2');
+  check('La sustitución queda como novedad NOV-', r.data.novedades.length === 1 && r.data.novedades[0].tipo === 'SUSTITUCION' && /^NOV-\d{4}$/.test(r.data.novedades[0].codigo));
+
+  // Alistamiento parcial: faltante automático
+  await transicion(id, 'iniciar', { alistador: 'TEST-op' });
+  r = await api('POST', `/solicitudes/${id}/novedades`, { tipo: 'TALLA_NO_DISPONIBLE', itemId: it1.id, cantidad: 9, descripcion: 'No hay talla M' }, tokens.op);
+  check('Cantidad mayor a la solicitada → 400', r.status === 400);
+  r = await api('POST', `/solicitudes/${id}/novedades`, { tipo: 'DANADO', itemId: it1.id, cantidad: 1, descripcion: 'Una unidad rota' }, tokens.op);
+  check('Novedad manual (dañado) registrada', r.status === 201 && r.data.novedades.some(n => n.tipo === 'DANADO'), r.data?.error);
+  r = await transicion(id, 'finalizar', { cantidades: { [it1.id]: 2 }, nota: 'Solo había 2 en buen estado' });
+  const faltante = r.data.novedades?.find(n => n.tipo === 'FALTANTE');
+  check('Finalizar parcial crea el faltante con la nota', faltante && faltante.cantidad === 2 && faltante.descripcion.includes('Solo había 2'), JSON.stringify(r.data));
+  r = await transicion(id, 'despachar');
+  p = await producto('TEST-E-1');
+  check('Despacho: E-1 baja 2 + 3 = 5 y libera la reserva', p.cantidad === 5 && p.cantidad_reservada === 0, `cantidad=${p.cantidad} reservada=${p.cantidad_reservada}`);
+
+  // Devolución
+  r = await api('POST', `/solicitudes/${id}/devolver`, { itemId: it1.id, cantidad: 3, descripcion: 'Devuelven de más' });
+  check('Devolver más de lo despachado en ese ítem (2) → 400', r.status === 400, r.data?.error);
+  r = await api('POST', `/solicitudes/${id}/devolver`, { itemId: it2.id, cantidad: 3, descripcion: 'No les sirvió' });
+  p = await producto('TEST-E-1');
+  check('Devolución suma al stock', r.status === 201 && p.cantidad === 8 && r.data.items.find(i => i.id === it2.id).cantidad_devuelta === 3, `${r.status} ${r.data?.error} cantidad=${p?.cantidad}`);
+  r = await api('POST', `/solicitudes/${id}/devolver`, { itemId: it2.id, cantidad: 1, descripcion: 'Otra vez' });
+  check('No se devuelve dos veces lo mismo → 400', r.status === 400);
+
+  // Consistencia historial ↔ stock con las acciones nuevas
+  const { compararConsistencia } = require('../scripts/verificar-consistencia');
+  const codigos = ['TEST-E-1', 'TEST-E-2', 'TEST-E-3'];
+  const [productosBD, historialBD, solicitudesBD] = await Promise.all([
+    prisma.producto.findMany({ where: { codigo_producto: { in: codigos } } }),
+    prisma.historial.findMany({ where: { codigo_producto: { in: codigos } } }),
+    prisma.solicitud.findMany({ where: { codigo_sbo: 'TEST-E-SBO' }, include: { items: true } })
+  ]);
+  const consistencia = compararConsistencia({ productos: productosBD, historial: historialBD, solicitudes: solicitudesBD });
+  check('El verificador cuadra con devolución, sustitución y novedades', consistencia.every(c => c.ok), JSON.stringify(consistencia.filter(c => !c.ok)));
+
+  // Lista y trazabilidad
+  r = await api('GET', '/novedades?pagina=1&sbo=TEST-E-SBO', undefined, tokens.consulta);
+  check('Lista de novedades de la SBO (4) con resumen por tipo', r.status === 200 && r.data.total === 4 && r.data.resumen.DEVOLUCION === 1, JSON.stringify(r.data?.resumen));
+  r = await api('GET', '/novedades?tipo=FALTANTE&q=TEST-E-1');
+  check('Filtro por tipo y texto (sin página: todo)', Array.isArray(r.data) && r.data.length === 1, JSON.stringify(r.data).slice(0, 200));
+  r = await api('GET', '/trazabilidad?codigo=test-e-sbo', undefined, tokens.consulta);
+  const acciones = r.data.eventos?.map(e => e.accion) || [];
+  check('Trazabilidad de la SBO: estados, novedades, despacho y devolución', r.data.tipo === 'sbo' && acciones.includes('SBO APROBADA') && acciones.includes('SALIDA SBO') && acciones.includes('DEVOLUCIÓN SBO') && acciones.some(a => a.startsWith('NOVEDAD')), acciones.join(' | ') || `${r.status} ${r.data?.error}`);
+  r = await api('GET', '/trazabilidad?codigo=TEST-E-2');
+  const accionesP = r.data.eventos.map(e => e.accion);
+  check('Trazabilidad del producto sustituido: ingreso, reserva y sustitución', r.data.tipo === 'producto' && accionesP[0] === 'INGRESO NUEVO' && accionesP.includes('SBO APROBADA') && accionesP.includes('NOVEDAD · Sustitución') && !accionesP.includes('NOVEDAD'), accionesP.join(' | '));
+  r = await api('GET', '/trazabilidad?codigo=NO-EXISTE-XYZ');
+  check('Código sin registros → 404', r.status === 404);
 });

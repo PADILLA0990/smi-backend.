@@ -12,8 +12,8 @@
 // Sale con código 1 si encuentra diferencias.
 
 const ESTADOS_CON_RESERVA = ['APROBADA', 'EN_ALISTAMIENTO', 'ALISTADA'];
-// Acciones que no mueven stock ni ubicación
-const SIN_EFECTO = ['EDICIÓN', 'INACTIVACIÓN', 'ACTIVACIÓN'];
+// Acciones que no mueven stock ni ubicación (NOVEDAD: Fase E, informativa)
+const SIN_EFECTO = ['EDICIÓN', 'INACTIVACIÓN', 'ACTIVACIÓN', 'NOVEDAD'];
 
 const numero = (texto, regex) => {
   const m = texto && texto.match(regex);
@@ -48,6 +48,16 @@ function recalcular(historial, zonas = {}) {
         const n = numero(d, /cantidad:\s*(\d+)/i);
         if (n === null) { p.avisos.push(`#${mov.id} INGRESO ADICIONAL sin cantidad legible`); break; }
         if (!p.existe && !p.agotado) p.avisos.push(`#${mov.id} INGRESO ADICIONAL sobre un producto que no existía`);
+        p.existe = true;
+        p.agotado = false;
+        p.cantidad += n;
+        break;
+      }
+      case 'DEVOLUCIÓN SBO': {
+        // Fase E: unidades despachadas que vuelven al stock
+        const n = numero(d, /Devolución de (\d+)/i);
+        if (n === null) { p.avisos.push(`#${mov.id} DEVOLUCIÓN SBO sin cantidad legible`); break; }
+        if (!p.existe && !p.agotado) p.avisos.push(`#${mov.id} DEVOLUCIÓN SBO sobre un producto que no existía`);
         p.existe = true;
         p.agotado = false;
         p.cantidad += n;

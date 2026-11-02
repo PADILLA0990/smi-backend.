@@ -116,6 +116,7 @@ model Solicitud {
   fecha_vencimiento         DateTime?
   items                     SolicitudItem[]
   eventos                   SolicitudEvento[]
+  novedades                 Novedad[]
 
   @@index([organizacionId])
 }
@@ -128,6 +129,9 @@ model SolicitudItem {
   descripcion         String // Copia de la descripción al momento de crear la solicitud
   cantidad_solicitada Int
   cantidad_alistada   Int       @default(0)
+  cantidad_devuelta   Int       @default(0) // Fase E: unidades devueltas al stock después del despacho
+  codigo_original     String? // Fase E: producto pedido originalmente si se sustituyó
+  novedades           Novedad[]
 
   @@index([solicitudId])
 }
@@ -170,6 +174,7 @@ model Usuario {
   sesiones              SesionRefresh[]
   historial             Historial[]
   documentos            Documento[]
+  novedades             Novedad[]
 }
 
 model SesionRefresh {
@@ -263,6 +268,7 @@ model Motivo {
   actualizado_en DateTime   @updatedAt
 
   documentos Documento[]
+  novedades  Novedad[]
 
   @@unique([tipo, nombre])
 }
@@ -374,4 +380,40 @@ model DocumentoLinea {
   producto_nuevo  Boolean    @default(false)
 
   @@index([documentoId])
+}
+
+// --- FASE E: NOVEDADES ---
+
+enum TipoNovedad {
+  FALTANTE
+  DANADO
+  TALLA_NO_DISPONIBLE
+  SUSTITUCION
+  DEVOLUCION
+  OTRO
+}
+
+model Novedad {
+  id               Int            @id @default(autoincrement())
+  codigo           String         @unique // NOV-0001
+  tipo             TipoNovedad
+  solicitudId      Int?
+  solicitud        Solicitud?     @relation(fields: [solicitudId], references: [id], onDelete: SetNull)
+  itemId           Int?
+  item             SolicitudItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  codigo_producto  String // Texto (no FK), como en SolicitudItem
+  codigo_sustituto String? // Solo en SUSTITUCION
+  cantidad         Int
+  descripcion      String
+  motivoId         Int?
+  motivo           Motivo?        @relation(fields: [motivoId], references: [id], onDelete: SetNull)
+  usuario          String
+  usuarioId        Int?
+  usuarioRef       Usuario?       @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  fecha            DateTime       @default(now())
+
+  @@index([solicitudId])
+  @@index([codigo_producto])
+  @@index([tipo])
+  @@index([fecha])
 }

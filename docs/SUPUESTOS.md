@@ -61,3 +61,6 @@ Reglas que no estaban definidas y se resolvieron con la opción más simple. Las
 | 55 | 02/11/2026 | Codificación: el consecutivo es por base (categoría + subcategoría + nivel 3), el siguiente al mayor existente; los códigos no se reutilizan. Las categorías sin letra (antiguas o de prueba) siguen con código libre. | `lib/codificacion.js` | — |
 | 56 | 02/11/2026 | Un producto codificado no cambia de categoría ni de condición: el código las lleva. Otra condición es otro producto con la misma base y otro sufijo. | `productos/routes.js` | — |
 | 57 | 02/11/2026 | Al cargar el árbol, las categorías actuales se renombran a la nueva (Textiles → Ropa, etc.) y el texto de categoría de sus productos se actualiza. Los productos existentes no se recodifican. | `lib/codificacion.js` | — |
+| 58 | 02/11/2026 | Las novedades de faltante, dañado, talla y otro son informativas: no mueven stock. Retirar una unidad dañada se hace con un documento de salida. | `lib/novedades.js` | — |
+| 59 | 02/11/2026 | La sustitución cambia el ítem completo (misma cantidad) por otro producto y solo antes de finalizar el alistamiento. | `lib/novedades.js` | — |
+| 60 | 02/11/2026 | La devolución vuelve al mismo producto despachado y a su ubicación actual; si el producto ya no existe, se registra con un documento de ingreso. | `lib/novedades.js` | — |

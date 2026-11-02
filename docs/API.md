@@ -282,6 +282,21 @@ Los productos de `/mapa` traen `ubicacion` (su `codigo_estanteria` o, si no tien
 - Al crear un producto (`POST /productos` o en un documento) de una categoría con letra se exigen `subcategoriaId` y `varianteId`, y el código debe tener la forma `NNN-<cat><sub><var>-<estado>` (400 con la forma esperada). Las categorías sin letra conservan el código libre.
 - `PATCH /productos/:id` no cambia la categoría ni la condición de un producto codificado (400).
 
+## Novedades y trazabilidad (Fase E)
+
+| Método | Ruta | Permiso | Respuesta |
+|---|---|---|---|
+| POST | `/solicitudes/:id/novedades` | `sbo:alistar` | `{ tipo: FALTANTE\|DANADO\|TALLA_NO_DISPONIBLE\|OTRO, itemId, cantidad (1 a lo solicitado), descripcion (≥ 5), motivoId? }` → 201 con la solicitud. Solo en APROBADA, EN_ALISTAMIENTO, ALISTADA o DESPACHADA. No mueve stock. |
+| POST | `/solicitudes/:id/sustituir` | `sbo:alistar` | `{ itemId, codigo_sustituto, descripcion }` → 201. APROBADA o EN_ALISTAMIENTO. Libera la reserva del producto original y reserva el sustituto (400 si no alcanza). El ítem guarda `codigo_original`. |
+| POST | `/solicitudes/:id/devolver` | `movimientos:registrar` | `{ itemId, cantidad, descripcion }` → 201. Solo DESPACHADA; hasta lo despachado menos lo ya devuelto (`cantidad_devuelta`). Suma al stock (historial `DEVOLUCIÓN SBO`). |
+| GET | `/novedades?pagina&porPagina&tipo&sbo&q&desde&hasta` | `inventario:ver` | `{ datos, total, pagina, porPagina, resumen: { TIPO: n } }`. Sin `pagina`, el arreglo completo (exportar). |
+| GET | `/novedades/tipos` | `inventario:ver` | `{ tipos: { FALTANTE: 'Faltante', … }, manuales: [...] }` |
+| GET | `/trazabilidad?codigo=` | `inventario:ver` | `{ tipo: 'producto'\|'sbo', codigo, resumen, eventos: [{ fecha, origen: historial\|novedad\|sbo, accion, detalle, usuario, documento?, sbo?, producto?, codigo? }] }` en orden cronológico. 404 si no hay registros. |
+
+- Cada novedad recibe un código `NOV-0001` y deja una línea `NOVEDAD` (sin efecto en stock) en el historial del producto.
+- Al finalizar un alistamiento parcial, cada ítem incompleto crea una novedad `FALTANTE` con la nota.
+- El detalle de una SBO (`GET /solicitudes/:id`) incluye `novedades`, y cada ítem `cantidad_devuelta` y `codigo_original`.
+
 ## Ubicaciones para el Mapa de Bodega (solo lectura)
 
 | Método | Ruta | Permiso | Respuesta |

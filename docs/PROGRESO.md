@@ -199,9 +199,17 @@ Sin cambios en la base de datos.
 - Producto nuevo: al elegir una categoría con letra pide subcategoría y nivel 3 y muestra el código calculado (solo lectura).
 - Un producto codificado no cambia de categoría ni de condición al editarlo.
 
+## Fase E: Novedades y trazabilidad (02/11/2026, sin desplegar: se publica al terminar la ronda de testers)
+
+- Migración `7_novedades` (aditiva): tabla `Novedad` (`NOV-0001`), enum `TipoNovedad` y en `SolicitudItem` `cantidad_devuelta` y `codigo_original`.
+- Novedades por ítem de SBO: faltante, artículo dañado, talla no disponible y otro (con motivo opcional del catálogo, tipo NOVEDAD). El alistamiento parcial crea los faltantes por sí solo.
+- Sustitución durante la aprobación o el alistamiento: mueve la reserva al producto sustituto.
+- Devolución después del despacho: las unidades vuelven al stock; el verificador de consistencia la suma como ingreso.
+- Página **Novedades** con filtros, resumen por tipo y exportación a CSV (Excel).
+- Página **Trazabilidad** (`/trazabilidad?codigo=`): línea de tiempo de un producto o una SBO. Enlaces desde el detalle de la SBO, las novedades y el kardex.
+
 ## Pendiente (en orden)
 
-- **E** Novedades y trazabilidad.
 - **F** Indicadores.
 - **G** Conciliación (requiere BD).
 - **H** Calidad y entrega.

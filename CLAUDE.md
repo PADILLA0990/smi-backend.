@@ -32,6 +32,7 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - `dashboard/routes.js` y `lib/dashboard.js`: `GET /api/dashboard`, el resumen del panel principal (Fase D4). Reutiliza las reglas del inventario y de las SBO para que los números coincidan con las listas.
 - `estanterias/routes.js` y `lib/estanterias.js`: Mapa de Bodega (`GET /api/mapa`) y estanterías. Guardar una estantería genera sus huecos `Z1-A-2-04` como ubicaciones del catálogo (`Ubicacion.estanteriaId`). `npm run estanterias:iniciales` carga la distribución inicial (sin `--aplicar` solo muestra).
 - `codificacion/routes.js` y `lib/codificacion.js`: códigos `001-RCM-B` (`docs/CODIFICACION.md`). Una categoría con letra exige subcategoría y variante y valida el código; el consecutivo lo da `siguienteCodigo`. El árbol se administra en Configuración → Codificación.
+- `novedades/routes.js` y `lib/novedades.js` (Fase E): lista de novedades y trazabilidad. Registrar novedad, sustituir y devolver van en `solicitudes/routes.js` (`/solicitudes/:id/novedades|sustituir|devolver`). La devolución deja `DEVOLUCIÓN SBO` ("Devolución de N") que el verificador suma; `NOVEDAD` no tiene efecto.
 - `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`. Un producto agotado se conserva con 0 unidades.
 - `lib/errores.js`: errores con status y mensajes en español.
 - `scripts/verificar-consistencia.js`: lógica pura reutilizable para Conciliación.

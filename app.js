@@ -14,6 +14,7 @@ const documentosRoutes = require('./documentos/routes');
 const dashboardRoutes = require('./dashboard/routes');
 const estanteriasRoutes = require('./estanterias/routes');
 const codificacionRoutes = require('./codificacion/routes');
+const novedadesRoutes = require('./novedades/routes');
 const { router: catalogosRoutes } = require('./catalogos/routes');
 
 const app = express();
@@ -69,6 +70,7 @@ app.use('/api', estanteriasRoutes);
 
 // Codificación de productos 001-RCM-B
 app.use('/api', codificacionRoutes);
+app.use('/api', novedadesRoutes);
 
 // Catálogos, parámetros y ubicaciones (estas últimas las consume el Mapa de Bodega)
 app.use('/api', catalogosRoutes);
