@@ -191,9 +191,16 @@ Sin cambios en la base de datos.
 - `/inventario-mapa`: racks de cada zona como cuadrícula nivel × hueco (sin capacidad), áreas, panel de detalle con Reubicar, Kardex e Ingresar aquí, búsqueda "¿Dónde está?" y lista de productos fuera de estanterías.
 - "Ingresar aquí" abre el documento de ingreso con esa ubicación para los productos nuevos (`/movimientos?pestana=ingreso&ubicacion=`).
 
+## Codificación de productos 001-RCM-B (02/11/2026)
+
+- Migración `6_codificacion` (aditiva): `Categoria.letra` y `nombre_variante`, tablas `Subcategoria` y `Variante`, y `Producto.subcategoriaId` / `varianteId`.
+- El sistema asigna el consecutivo por base (`GET /api/codificacion/siguiente`); el sufijo sale de la condición (P, B, D, X). El mismo artículo en otra condición conserva la base y cambia solo el sufijo.
+- Configuración → Codificación: letras de categoría, subcategorías y nivel 3 (variantes), con botón para cargar el árbol propuesto (12 categorías; Textiles → Ropa, Hogar → Cocina y menaje, Aseo no perecedero → Higiene personal, Papelería → Escolar y papelería, Juguetes → Juguetes y recreación).
+- Producto nuevo: al elegir una categoría con letra pide subcategoría y nivel 3 y muestra el código calculado (solo lectura).
+- Un producto codificado no cambia de categoría ni de condición al editarlo.
+
 ## Pendiente (en orden)
 
-- **Codificación de productos** (`docs/CODIFICACION.md`).
 - **E** Novedades y trazabilidad.
 - **F** Indicadores.
 - **G** Conciliación (requiere BD).

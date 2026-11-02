@@ -1,4 +1,4 @@
-# Codificación de productos (aprobada el 31/10/2026, pendiente de implementar)
+# Codificación de productos (aprobada el 31/10/2026, implementada el 02/11/2026)
 
 ## Formato
 

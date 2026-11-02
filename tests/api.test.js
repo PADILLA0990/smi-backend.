@@ -30,6 +30,13 @@ const USUARIOS = {
 const tokens = {};
 
 async function limpiarDatosTest() {
+  // Productos codificados de prueba (001-QCM-B…): su código no lleva TEST-, pero su categoría sí
+  const codificados = (await prisma.producto.findMany({ where: { categoria: { startsWith: 'TEST-' }, NOT: { codigo_producto: { startsWith: 'TEST-' } } }, select: { codigo_producto: true } })).map(p => p.codigo_producto);
+  if (codificados.length) {
+    await prisma.documento.deleteMany({ where: { lineas: { some: { codigo_producto: { in: codificados } } } } });
+    await prisma.historial.deleteMany({ where: { codigo_producto: { in: codificados } } });
+    await prisma.producto.deleteMany({ where: { codigo_producto: { in: codificados } } });
+  }
   // Documentos de prueba (Fase D2): los registra un usuario TEST- o incluyen productos TEST-
   await prisma.documento.deleteMany({ where: { OR: [{ operario: { startsWith: 'TEST-' } }, { lineas: { some: { codigo_producto: { startsWith: 'TEST-' } } } }] } });
   // Solicitudes de prueba: código TEST- o creadas por un usuario TEST- (las de código automático SBO-0001…).
@@ -842,4 +849,70 @@ test('Mapa de Bodega: estanterías, huecos generados y contenido del mapa', asyn
   const z1 = r.data.zonas.find(z => z.zona === 'Z1');
   const j = r.data.zonas.find(z => z.zona === 'Z2')?.estanterias.find(e => e.rack === 'J');
   check('Zona 1 con racks A–I y áreas; rack J con 3 niveles', z1 && 'ABCDEFGHI'.split('').every(x => z1.estanterias.some(e => e.rack === x)) && z1.areas.some(a => a.codigo === 'Alistamiento 1') && j?.niveles === 3, JSON.stringify(z1?.estanterias.map(e => e.codigo)));
+});
+
+test('Codificación 001-RCM-B: árbol, código sugerido y validación al crear', async () => {
+  const cat = (await api('POST', '/catalogos/categorias', { nombre: 'TEST-Cod' })).data;
+  r = await api('PATCH', `/codificacion/categorias/${cat.id}`, { letra: 'q', nombre_variante: 'Público' }, tokens.op);
+  check('Operario no edita la codificación → 403', r.status === 403);
+  r = await api('PATCH', `/codificacion/categorias/${cat.id}`, { letra: 'q', nombre_variante: 'Público' });
+  check('Letra de categoría en mayúscula', r.status === 200 && r.data.letra === 'Q', r.data?.error);
+  r = await api('PATCH', `/codificacion/categorias/${cat.id}`, { letra: 'QQ' });
+  check('Letra de dos caracteres → 400', r.status === 400);
+  const sub = (await api('POST', `/codificacion/categorias/${cat.id}/subcategorias`, { letra: 'c', nombre: 'Camisas' })).data;
+  const varM = (await api('POST', `/codificacion/categorias/${cat.id}/variantes`, { letra: 'M', nombre: 'Mujer' })).data;
+  r = await api('POST', `/codificacion/categorias/${cat.id}/subcategorias`, { letra: 'C', nombre: 'Otra' });
+  check('Subcategoría con letra repetida → 409', r.status === 409);
+
+  const sugerir = (condicion, excluir = '') => api('GET', `/codificacion/siguiente?categoriaId=${cat.id}&subcategoriaId=${sub.id}&varianteId=${varM.id}&condicion=${condicion}&excluir=${excluir}`, undefined, tokens.op);
+  r = await sugerir('BUENO');
+  check('Primer código sugerido 001-QCM-B', r.data.codigo === '001-QCM-B', JSON.stringify(r.data));
+  const base = { descripcion: 'Camisa QA', categoriaId: cat.id, subcategoriaId: sub.id, varianteId: varM.id, cantidad: 3 };
+  r = await api('POST', '/productos', { ...base, codigo_producto: '001-QCM-B', condicion: 'BUENO' });
+  check('Crea el producto codificado con subcategoría y variante', r.status === 201 && r.data.producto.subcategoriaId === sub.id && r.data.producto.varianteId === varM.id, r.data?.error);
+  const prod = r.data.producto;
+  r = await sugerir('BUENO');
+  check('El consecutivo avanza: 002-QCM-B', r.data.codigo === '002-QCM-B');
+  r = await sugerir('BUENO', '002-QCM-B,003-QCM-B');
+  check('Excluye los códigos ya usados en el formulario', r.data.codigo === '004-QCM-B', r.data.codigo);
+  r = await sugerir('DANADO');
+  check('El sufijo sigue el estado (X = dañado)', r.data.codigo === '002-QCM-X');
+
+  r = await api('POST', '/productos', { ...base, codigo_producto: '009-QCM-D', condicion: 'BUENO' });
+  check('Sufijo que no coincide con el estado → 400', r.status === 400 && r.data.error.includes('-QCM-B'), r.data?.error);
+  r = await api('POST', '/productos', { ...base, codigo_producto: 'CAM-001', condicion: 'BUENO' });
+  check('Código libre en categoría codificada → 400', r.status === 400);
+  r = await api('POST', '/productos', { descripcion: 'Sin niveles', categoriaId: cat.id, codigo_producto: '010-QCM-B', condicion: 'BUENO', cantidad: 1 });
+  check('Sin subcategoría ni variante → 400', r.status === 400 && r.data.error.includes('subcategoría'), r.data?.error);
+  r = await api('POST', '/productos', { ...base, codigo_producto: '001-QCM-D', condicion: 'DETERIORO' });
+  check('Otra condición: misma base con otro sufijo', r.status === 201, r.data?.error);
+
+  r = await api('POST', '/documentos/ingreso', { origen: 'DONACION', lineas: [{ codigo_producto: '002-QCM-B', cantidad: 2, nuevo: { descripcion: 'Camisa por documento', categoriaId: cat.id, subcategoriaId: sub.id, varianteId: varM.id, condicion: 'BUENO' } }] });
+  check('Producto codificado nuevo desde un documento de ingreso', r.status === 201, r.data?.error);
+
+  r = await api('PATCH', `/productos/${prod.id}`, { condicion: 'PERFECTO' });
+  check('Un producto codificado no cambia de estado → 400', r.status === 400 && r.data.error.includes('001-QCM-B'), r.data?.error);
+  r = await api('PATCH', `/productos/${prod.id}`, { descripcion: 'Camisa QA editada' });
+  check('Sí se edita la descripción', r.status === 200);
+  r = await api('PATCH', `/codificacion/categorias/${cat.id}`, { letra: 'Y' });
+  check('La letra no cambia si ya hay productos → 409', r.status === 409);
+  r = await api('PATCH', `/codificacion/subcategorias/${sub.id}`, { letra: 'D' });
+  check('La letra de la subcategoría tampoco → 409', r.status === 409);
+  r = await api('PATCH', `/codificacion/variantes/${varM.id}`, { activo: false });
+  r = await sugerir('BUENO');
+  check('Variante desactivada: no sugiere código → 400', r.status === 400, r.data?.error);
+
+  r = await api('GET', '/codificacion', undefined, tokens.consulta);
+  const nodo = r.data.find(c => c.id === cat.id);
+  check('Árbol con letras, niveles y productos por subcategoría', nodo.letra === 'Q' && nodo.nombre_variante === 'Público' && nodo.subcategorias[0].productos === 3 && nodo.variantes[0].activo === false, JSON.stringify(nodo).slice(0, 300));
+
+  // Carga del árbol: la categoría con el nombre anterior recibe la letra y el nombre nuevo
+  const { crearArbol } = require('../lib/codificacion');
+  await api('POST', '/catalogos/categorias', { nombre: 'TEST-Viejo' });
+  const arbolTest = [{ letra: 'W', nombre: 'TEST-Arbol', antes: ['TEST-Viejo'], variante: 'Tamaño', variantes: [['S', 'Sencillo']], subcategorias: [['C', 'Cobijas'], ['O', 'Otros']] }];
+  let res = await crearArbol(prisma, arbolTest);
+  const renombrada = await prisma.categoria.findFirst({ where: { letra: 'W' }, include: { subcategorias: true } });
+  check('El árbol renombra la categoría anterior y crea sus niveles', renombrada?.nombre === 'TEST-Arbol' && renombrada.subcategorias.length === 2 && res.variantes === 1, JSON.stringify(res));
+  res = await crearArbol(prisma, arbolTest);
+  check('Cargarlo otra vez no crea nada', res.categorias.length === 0 && res.subcategorias === 0 && res.variantes === 0);
 });

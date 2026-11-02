@@ -268,6 +268,20 @@ Claves disponibles:
 
 Los productos de `/mapa` traen `ubicacion` (su `codigo_estanteria` o, si no tiene, su `ubicacion_general`).
 
+## Codificación de productos (`001-RCM-B`)
+
+| Método | Ruta | Permiso | Respuesta |
+|---|---|---|---|
+| GET | `/codificacion` | `inventario:ver` | `[{ id, nombre, letra, nombre_variante, activo, subcategorias: [{ id, letra, nombre, activo, productos }], variantes: [...] }]` |
+| GET | `/codificacion/siguiente?categoriaId&subcategoriaId&varianteId&condicion&excluir=a,b` | `inventario:ver` | `{ codigo }`: el consecutivo siguiente de esa base (`null` si la categoría no tiene letra). `excluir`: códigos ya usados en el documento en curso. |
+| PATCH | `/codificacion/categorias/:id` | `configuracion:gestionar` | `{ letra?, nombre_variante? }`. La letra no cambia si hay productos codificados (409). |
+| POST | `/codificacion/categorias/:id/subcategorias` y `/variantes` | `configuracion:gestionar` | `{ letra, nombre }` → 201. Letra repetida en la categoría → 409. |
+| PATCH | `/codificacion/subcategorias/:id` y `/variantes/:id` | `configuracion:gestionar` | `{ nombre?, letra?, activo? }`. La letra no cambia si tiene productos. |
+| POST | `/codificacion/arbol-inicial` | `configuracion:gestionar` | Carga el árbol de `docs/CODIFICACION.md` (solo lo que falte) → `{ categorias, subcategorias, variantes }`. |
+
+- Al crear un producto (`POST /productos` o en un documento) de una categoría con letra se exigen `subcategoriaId` y `varianteId`, y el código debe tener la forma `NNN-<cat><sub><var>-<estado>` (400 con la forma esperada). Las categorías sin letra conservan el código libre.
+- `PATCH /productos/:id` no cambia la categoría ni la condición de un producto codificado (400).
+
 ## Ubicaciones para el Mapa de Bodega (solo lectura)
 
 | Método | Ruta | Permiso | Respuesta |

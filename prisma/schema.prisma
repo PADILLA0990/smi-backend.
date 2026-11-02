@@ -9,26 +9,63 @@ datasource db {
 }
 
 model Producto {
-  id                 Int        @id @default(autoincrement())
-  codigo_producto    String     @unique
+  id                 Int           @id @default(autoincrement())
+  codigo_producto    String        @unique
   descripcion        String
   categoria          String
   cantidad           Int
-  cantidad_reservada Int        @default(0) // Apartada por Solicitudes SBO aprobadas, aún no despachadas
+  cantidad_reservada Int           @default(0) // Apartada por Solicitudes SBO aprobadas, aún no despachadas
   estado             String
   ubicacion_general  String
   codigo_estanteria  String?
-  fecha_ingreso      DateTime   @default(now())
+  fecha_ingreso      DateTime      @default(now())
   // Fase C: catálogos y atributos (opcionales para no afectar productos existentes)
   categoriaId        Int?
-  categoriaRef       Categoria? @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+  categoriaRef       Categoria?    @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
   talla              String?
   condicion          Condicion?
   grupo              String? // Género o grupo etario (lista fija en lib/catalogos.js)
   stock_minimo       Int? // Vacío: se usa el parámetro stock_minimo_defecto
-  activo             Boolean    @default(true)
+  activo             Boolean       @default(true)
+  // Codificación 001-RCM-B: nivel 2 (subcategoría) y nivel 3 (variante)
+  subcategoriaId     Int?
+  subcategoriaRef    Subcategoria? @relation(fields: [subcategoriaId], references: [id], onDelete: SetNull)
+  varianteId         Int?
+  varianteRef        Variante?     @relation(fields: [varianteId], references: [id], onDelete: SetNull)
 
   @@index([categoriaId])
+  @@index([subcategoriaId])
+  @@index([varianteId])
+}
+
+// Codificación: nivel 2 de una categoría (C = Camisas y blusas en Ropa)
+model Subcategoria {
+  id             Int        @id @default(autoincrement())
+  categoriaId    Int
+  categoria      Categoria  @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+  letra          String
+  nombre         String
+  activo         Boolean    @default(true)
+  creado_en      DateTime   @default(now())
+  actualizado_en DateTime   @updatedAt
+  productos      Producto[]
+
+  @@unique([categoriaId, letra])
+}
+
+// Codificación: nivel 3 de una categoría (M = Mujer en Ropa, D = Doble en Textiles del hogar)
+model Variante {
+  id             Int        @id @default(autoincrement())
+  categoriaId    Int
+  categoria      Categoria  @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+  letra          String
+  nombre         String
+  activo         Boolean    @default(true)
+  creado_en      DateTime   @default(now())
+  actualizado_en DateTime   @updatedAt
+  productos      Producto[]
+
+  @@unique([categoriaId, letra])
 }
 
 model Historial {
@@ -172,14 +209,19 @@ enum TipoMotivo {
 }
 
 model Categoria {
-  id             Int        @id @default(autoincrement())
-  nombre         String     @unique
-  prefijo        String?    @unique // Prefijo sugerido para códigos de producto (ROP, APP…)
-  descripcion    String?
-  activo         Boolean    @default(true)
-  creado_en      DateTime   @default(now())
-  actualizado_en DateTime   @updatedAt
-  productos      Producto[]
+  id              Int            @id @default(autoincrement())
+  nombre          String         @unique
+  prefijo         String?        @unique // Prefijo sugerido para códigos de producto (ROP, APP…)
+  // Codificación 001-RCM-B (docs/CODIFICACION.md): letra de nivel 1 y nombre del nivel 3 (Público, Tamaño…)
+  letra           String?        @unique
+  nombre_variante String?
+  subcategorias   Subcategoria[]
+  variantes       Variante[]
+  descripcion     String?
+  activo          Boolean        @default(true)
+  creado_en       DateTime       @default(now())
+  actualizado_en  DateTime       @updatedAt
+  productos       Producto[]
 }
 
 model Organizacion {
@@ -236,16 +278,16 @@ model UnidadManejo {
 }
 
 model Ubicacion {
-  id             Int      @id @default(autoincrement())
-  codigo         String   @unique // Lo que se guarda en Producto.codigo_estanteria (o ubicacion_general para Recepción)
+  id             Int         @id @default(autoincrement())
+  codigo         String      @unique // Lo que se guarda en Producto.codigo_estanteria (o ubicacion_general para Recepción)
   nombre         String?
   zona           String?
   estante        String?
   nivel          String?
   posicion       String?
-  activo         Boolean  @default(true)
-  creado_en      DateTime @default(now())
-  actualizado_en DateTime @updatedAt
+  activo         Boolean     @default(true)
+  creado_en      DateTime    @default(now())
+  actualizado_en DateTime    @updatedAt
   // Mapa de Bodega: hueco generado por una estantería (vacío en áreas como Recepción o Alistamiento)
   estanteriaId   Int?
   estanteria     Estanteria? @relation(fields: [estanteriaId], references: [id], onDelete: SetNull)

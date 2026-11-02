@@ -6,6 +6,7 @@ const { registrarHistorial } = require('../lib/historial');
 const { autorizar } = require('../auth/middleware');
 const { CONDICIONES, resolverActivo } = require('../lib/catalogos');
 const { listarProductos, kardexProducto, ESTADOS_SBO_ACTIVOS } = require('../lib/inventario');
+const { esCodificado } = require('../lib/codificacion');
 const { validarAtributos, resolverCategoria, resolverUbicacion, crearProducto, sumarStock, retirarStock } = require('../lib/movimientos');
 
 const router = express.Router();
@@ -236,6 +237,13 @@ router.patch('/productos/:id', autorizar('productos:editar'), async (req, res) =
     const producto = await prisma.$transaction(async (tx) => {
       const actual = await tx.producto.findUnique({ where: { id } });
       if (!actual) throw new StockError(404, 'El producto no existe.');
+      // El código de un producto codificado (001-RCM-B) depende de su categoría y su estado
+      if (esCodificado(actual)) {
+        const cambiaCategoria = ('categoriaId' in body && Number(body.categoriaId) !== actual.categoriaId) || ('categoria' in body && body.categoria !== actual.categoria);
+        if (cambiaCategoria || ('condicion' in data && data.condicion !== actual.condicion)) {
+          throw new StockError(400, `El código ${actual.codigo_producto} depende de la categoría y del estado: no se pueden cambiar. Si llegó en otro estado, regístrelo como producto nuevo (otra condición).`);
+        }
+      }
       if ('categoriaId' in body || 'categoria' in body) {
         const categoria = await resolverCategoria(tx, body);
         data.categoria = categoria.nombre;
