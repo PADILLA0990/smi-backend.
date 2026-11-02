@@ -64,3 +64,9 @@ Reglas que no estaban definidas y se resolvieron con la opción más simple. Las
 | 58 | 02/11/2026 | Las novedades de faltante, dañado, talla y otro son informativas: no mueven stock. Retirar una unidad dañada se hace con un documento de salida. | `lib/novedades.js` | — |
 | 59 | 02/11/2026 | La sustitución cambia el ítem completo (misma cantidad) por otro producto y solo antes de finalizar el alistamiento. | `lib/novedades.js` | — |
 | 60 | 02/11/2026 | La devolución vuelve al mismo producto despachado y a su ubicación actual; si el producto ya no existe, se registra con un documento de ingreso. | `lib/novedades.js` | — |
+| 61 | 02/11/2026 | Indicadores de alistamiento: cuentan las SBO cuyo alistamiento terminó en el período; cumplimiento, lotes, organizaciones y no entregadas cuentan las despachadas en el período. | `lib/indicadores.js` | — |
+| 62 | 02/11/2026 | "A tiempo" = despacho hasta el final del día requerido (Bogotá) más los días de tolerancia de Parámetros, la misma regla que "Atrasada". | `lib/indicadores.js` | Parámetro `dias_atraso_sbo` |
+| 63 | 02/11/2026 | Antigüedad = días desde `fecha_ingreso` del producto. "Sin movimiento" = último ingreso, salida o reubicación (las novedades y eventos de SBO no cuentan). | `lib/indicadores.js` | `?dias=` (90) |
+| 64 | 02/11/2026 | La diferencia de un conteo se calcula contra el stock del sistema en el momento de guardar lo contado; al aprobar, esa diferencia se suma al stock actual. Así los movimientos entre el conteo y la aprobación no se pierden. | `lib/conciliacion.js` | — |
+| 65 | 02/11/2026 | Un ajuste no puede dejar menos unidades que las reservadas por SBO (409): primero se resuelven las solicitudes. | `lib/conciliacion.js` | — |
+| 66 | 02/11/2026 | Contar y registrar lo hace quien registra movimientos (Operario en adelante); aprobar o anular, Coordinador o Administrador (`conciliacion:aprobar`). | `auth/permisos.js` | — |

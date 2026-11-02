@@ -19,6 +19,7 @@ const PERMISOS = {
   'sbo:cancelar': SUPERVISION,
   'sbo:renovar': SUPERVISION,       // reinicia el conteo de vencimiento
   'configuracion:gestionar': SUPERVISION, // catálogos y parámetros
+  'conciliacion:aprobar': SUPERVISION, // Fase G: aprobar o anular conteos (ajustes de stock) y ver la consistencia
   'usuarios:gestionar': ['ADMINISTRADOR']
 };
 

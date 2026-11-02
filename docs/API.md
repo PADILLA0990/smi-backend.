@@ -297,6 +297,27 @@ Los productos de `/mapa` traen `ubicacion` (su `codigo_estanteria` o, si no tien
 - Al finalizar un alistamiento parcial, cada ítem incompleto crea una novedad `FALTANTE` con la nota.
 - El detalle de una SBO (`GET /solicitudes/:id`) incluye `novedades`, y cada ítem `cantidad_devuelta` y `codigo_original`.
 
+## Indicadores (Fase F)
+
+| Método | Ruta | Permiso | Respuesta |
+|---|---|---|---|
+| GET | `/indicadores` | `inventario:ver` | `[{ id, grupo, titulo }]` (13 indicadores: Alistamiento, Inventario, Operación) |
+| GET | `/indicadores/:id?anio=2026&mes=11` | `inventario:ver` | `{ id, grupo, titulo, como_se_calcula, periodo, datos: [{ etiqueta, <serie>: n }], series: [{ clave, nombre }], excluidos?: { total, motivo, enlace, codigos }, apilado?, tipo?: 'lineas', unidad?, referencia?, destacado?, fotoActual?, anual?, total? }`. Sin `mes`: el año completo. `sin-movimiento` acepta `dias` (1–3650, 90 por defecto). |
+
+Ids: `sbo-por-alistador`, `unidades-por-alistador`, `tiempo-alistamiento`, `cumplimiento`, `lotes`, `unidades-por-categoria`, `entradas-salidas`, `antiguedad`, `sin-movimiento`, `movimientos-por-operario`, `organizaciones`, `novedades`, `no-entregadas`. El período usa la hora de Bogotá.
+
+## Conciliación (Fase G)
+
+| Método | Ruta | Permiso | Respuesta |
+|---|---|---|---|
+| GET | `/conteos` | `inventario:ver` | Últimos 100 conteos con `resumen` (sin líneas). |
+| GET | `/conteos/:id` | `inventario:ver` | `{ id, codigo: 'CNT-0001', estado: ABIERTO\|CERRADO\|ANULADO, alcance, filtro, lineas: [{ id, codigo_producto, descripcion, ubicacion, cantidad_sistema, cantidad_contada, diferencia, porcentaje, ajuste }], resumen: { productos, contados, con_diferencia, faltantes, sobrantes }, motivo? }` |
+| POST | `/conteos` | `movimientos:registrar` | `{ alcance: TODO\|CATEGORIA\|UBICACION, categoriaId?, ubicacion?, observaciones? }` → 201 con los productos activos del alcance. |
+| PUT | `/conteos/:id/lineas` | `movimientos:registrar` | `{ lineas: [{ id, cantidad_contada }] }` (null borra). Guarda el stock del sistema en ese momento. Solo ABIERTO. |
+| POST | `/conteos/:id/aprobar` | `conciliacion:aprobar` | `{ motivoId (tipo AJUSTE), observaciones? }`. Aplica `contada − sistema` al stock actual (historial `AJUSTE`, "Ajuste de ±N") y cierra. 409 si deja menos que lo reservado. |
+| POST | `/conteos/:id/anular` | `conciliacion:aprobar` | Descarta un conteo abierto sin ajustar. |
+| GET | `/conciliacion/consistencia` | `conciliacion:aprobar` | `{ revisados, consistentes, problemas: [{ codigo_producto, diferencias: [{ campo, esperado, guardado }], avisos }], generado }` (el verificador de `scripts/`). |
+
 ## Ubicaciones para el Mapa de Bodega (solo lectura)
 
 | Método | Ruta | Permiso | Respuesta |

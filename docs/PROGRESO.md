@@ -208,8 +208,18 @@ Sin cambios en la base de datos.
 - Página **Novedades** con filtros, resumen por tipo y exportación a CSV (Excel).
 - Página **Trazabilidad** (`/trazabilidad?codigo=`): línea de tiempo de un producto o una SBO. Enlaces desde el detalle de la SBO, las novedades y el kardex.
 
+## Fase F: Indicadores (02/11/2026, sin desplegar; sin cambios en la base)
+
+- `lib/indicadores.js`: 13 métricas como funciones puras con pruebas unitarias (`tests/indicadores.test.js`), período por mes o año en hora de Bogotá.
+- Página **Indicadores** (Recharts, carga diferida): panel izquierdo con año, mes y lista agrupada; panel derecho con el gráfico, "Cómo se calcula", aviso de registros excluidos con enlace para corregir y tabla "Datos del gráfico" exportable a CSV.
+- Paleta categórica validada (4 tonos, CVD y visión normal en verde); la leyenda y la tabla compensan el contraste bajo de dos tonos.
+
+## Fase G: Conciliación (02/11/2026, sin desplegar)
+
+- Migración `8_conciliacion_indices` (aditiva): tablas `Conteo` (`CNT-0001`) y `ConteoLinea`, enum `EstadoConteo`, y los índices de la Fase H (historial por código y fecha, acción; solicitudes por estado y fecha; ítems por producto; productos por activo y categoría).
+- Conteo físico de todo el inventario, una categoría o una ubicación; diferencias en unidades y %; aprobación (Coordinador o Administrador) con motivo de tipo AJUSTE que deja `AJUSTE` en el historial. El verificador suma los ajustes.
+- Página **Conciliación**: nuevo conteo, registro de cantidades, aprobar o anular, exportar a CSV y reporte de consistencia historial ↔ stock.
+
 ## Pendiente (en orden)
 
-- **F** Indicadores.
-- **G** Conciliación (requiere BD).
 - **H** Calidad y entrega.

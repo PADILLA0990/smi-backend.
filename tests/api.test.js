@@ -37,6 +37,8 @@ async function limpiarDatosTest() {
     await prisma.historial.deleteMany({ where: { codigo_producto: { in: codificados } } });
     await prisma.producto.deleteMany({ where: { codigo_producto: { in: codificados } } });
   }
+  // Conteos de prueba (Fase G): las líneas se borran en cascada
+  await prisma.conteo.deleteMany({ where: { creado_por: { startsWith: 'TEST-' } } });
   // Novedades de prueba (Fase E)
   await prisma.novedad.deleteMany({ where: { OR: [{ codigo_producto: { startsWith: 'TEST-' } }, { usuario: { startsWith: 'TEST-' } }] } });
   // Documentos de prueba (Fase D2): los registra un usuario TEST- o incluyen productos TEST-
@@ -991,4 +993,90 @@ test('Fase E: novedades, sustitución, devolución y trazabilidad', async () => 
   check('Trazabilidad del producto sustituido: ingreso, reserva y sustitución', r.data.tipo === 'producto' && accionesP[0] === 'INGRESO NUEVO' && accionesP.includes('SBO APROBADA') && accionesP.includes('NOVEDAD · Sustitución') && !accionesP.includes('NOVEDAD'), accionesP.join(' | '));
   r = await api('GET', '/trazabilidad?codigo=NO-EXISTE-XYZ');
   check('Código sin registros → 404', r.status === 404);
+});
+
+test('Fase F: endpoints de indicadores', async () => {
+  r = await api('GET', '/indicadores', undefined, tokens.consulta);
+  check('Catálogo de 13 indicadores', r.status === 200 && r.data.length === 13);
+  for (const { id } of r.data) {
+    const x = await api('GET', `/indicadores/${id}?anio=2026&mes=11`, undefined, tokens.consulta);
+    check(`Indicador ${id} responde con datos y cómo se calcula`, x.status === 200 && Array.isArray(x.data.datos) && x.data.como_se_calcula && x.data.periodo === 'Nov 2026', `${x.status} ${x.data?.error}`);
+  }
+  r = await api('GET', '/indicadores/lotes?anio=2026&mes=13');
+  check('Mes inválido → 400', r.status === 400);
+  r = await api('GET', '/indicadores/no-existe?anio=2026');
+  check('Indicador desconocido → 404', r.status === 404);
+  r = await api('GET', '/indicadores/sin-movimiento?anio=2026&dias=0');
+  check('Días inválidos → 400', r.status === 400);
+  r = await api('GET', '/indicadores', undefined, null);
+  check('Sin sesión → 401', r.status === 401);
+});
+
+test('Fase G: conteo físico, diferencias y ajustes aprobados', async () => {
+  const cat = (await api('POST', '/catalogos/categorias', { nombre: 'TEST-CatG' })).data;
+  const motivo = (await api('POST', '/catalogos/motivos', { tipo: 'AJUSTE', nombre: 'TEST-Conteo físico' })).data;
+  const motivoSalida = (await api('POST', '/catalogos/motivos', { tipo: 'SALIDA', nombre: 'TEST-Salida G' })).data;
+  for (const [codigo, cantidad] of [['TEST-G2-1', 10], ['TEST-G2-2', 5], ['TEST-G2-3', 8]]) {
+    r = await api('POST', '/productos', { codigo_producto: codigo, descripcion: `Producto ${codigo}`, categoriaId: cat.id, cantidad }, tokens.op);
+    assert.strictEqual(r.status, 201, r.data?.error);
+  }
+  r = await api('POST', '/conteos', { alcance: 'CATEGORIA', categoriaId: cat.id }, tokens.consulta);
+  check('Consulta no crea conteos → 403', r.status === 403);
+  r = await api('POST', '/conteos', { alcance: 'CATEGORIA', categoriaId: cat.id }, tokens.op);
+  check('Conteo por categoría con sus 3 productos', r.status === 201 && /^CNT-\d{4}$/.test(r.data.codigo) && r.data.lineas.length === 3 && r.data.filtro === 'TEST-CatG', `${r.status} ${r.data?.error}`);
+  const conteo = r.data;
+  const linea = (c) => conteo.lineas.find(l => l.codigo_producto === c).id;
+
+  // Movimiento después de crear: el conteo compara contra el stock al registrar lo contado
+  await api('POST', '/salida', { codigo_producto: 'TEST-G2-1', cantidad_retirada: 2, motivo: motivoSalida.nombre }, tokens.op);
+  r = await api('PUT', `/conteos/${conteo.id}/lineas`, { lineas: [{ id: linea('TEST-G2-1'), cantidad_contada: 7 }, { id: linea('TEST-G2-2'), cantidad_contada: 6 }, { id: linea('TEST-G2-3'), cantidad_contada: 8 }] }, tokens.op);
+  const l1 = r.data.lineas.find(l => l.codigo_producto === 'TEST-G2-1');
+  const l2 = r.data.lineas.find(l => l.codigo_producto === 'TEST-G2-2');
+  check('Diferencias en unidades y %, contra el stock al contar', r.status === 200 && l1.cantidad_sistema === 8 && l1.diferencia === -1 && l1.porcentaje === -12.5 && l2.diferencia === 1 && l2.porcentaje === 20, JSON.stringify([l1, l2]));
+  check('Resumen: 3 contados, 2 con diferencia, 1 faltante y 1 sobrante', r.data.resumen.contados === 3 && r.data.resumen.con_diferencia === 2 && r.data.resumen.faltantes === 1 && r.data.resumen.sobrantes === 1, JSON.stringify(r.data.resumen));
+  r = await api('PUT', `/conteos/${conteo.id}/lineas`, { lineas: [{ id: linea('TEST-G2-3'), cantidad_contada: -1 }] }, tokens.op);
+  check('Cantidad negativa → 400', r.status === 400);
+
+  // Reserva: el ajuste no puede dejar menos que lo reservado
+  r = await api('POST', '/solicitudes', { codigo_sbo: 'TEST-G2-SBO', beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-G2-1', cantidad_solicitada: 8 }] });
+  const sbo = r.data.id;
+  await transicion(sbo, 'aprobar');
+  r = await api('POST', `/conteos/${conteo.id}/aprobar`, { motivoId: motivo.id }, tokens.op);
+  check('Operario no aprueba → 403', r.status === 403);
+  r = await api('POST', `/conteos/${conteo.id}/aprobar`, {});
+  check('Sin motivo → 400', r.status === 400, r.data?.error);
+  r = await api('POST', `/conteos/${conteo.id}/aprobar`, { motivoId: motivo.id });
+  check('Ajuste por debajo de lo reservado → 409 y nada cambia', r.status === 409 && (await producto('TEST-G2-2')).cantidad === 5, r.data?.error);
+  await transicion(sbo, 'cancelar', { nota: 'Prueba de conteo' });
+
+  r = await api('POST', `/conteos/${conteo.id}/aprobar`, { motivoId: motivo.id, observaciones: 'Conteo de prueba' });
+  const [p1, p2, p3] = [await producto('TEST-G2-1'), await producto('TEST-G2-2'), await producto('TEST-G2-3')];
+  check('Aprobar: aplica las diferencias y cierra', r.status === 200 && r.data.estado === 'CERRADO' && p1.cantidad === 7 && p2.cantidad === 6 && p3.cantidad === 8, `${r.status} ${r.data?.error} ${p1?.cantidad}/${p2?.cantidad}/${p3?.cantidad}`);
+  h = await historial('TEST-G2-1');
+  check('Historial: AJUSTE con la diferencia y el motivo', h.at(-1).accion === 'AJUSTE' && h.at(-1).detalles.includes('Ajuste de -1') && h.at(-1).detalles.includes('TEST-Conteo físico'), h.at(-1)?.detalles);
+  check('Sin diferencia no hay ajuste', !(await historial('TEST-G2-3')).some(x => x.accion === 'AJUSTE'));
+  r = await api('PUT', `/conteos/${conteo.id}/lineas`, { lineas: [{ id: linea('TEST-G2-3'), cantidad_contada: 1 }] }, tokens.op);
+  check('Conteo cerrado no se modifica → 400', r.status === 400);
+
+  // Consistencia
+  const { compararConsistencia } = require('../scripts/verificar-consistencia');
+  const codigos = ['TEST-G2-1', 'TEST-G2-2', 'TEST-G2-3'];
+  const consistencia = compararConsistencia({
+    productos: await prisma.producto.findMany({ where: { codigo_producto: { in: codigos } } }),
+    historial: await prisma.historial.findMany({ where: { codigo_producto: { in: codigos } } }),
+    solicitudes: await prisma.solicitud.findMany({ where: { codigo_sbo: 'TEST-G2-SBO' }, include: { items: true } })
+  });
+  check('El verificador cuadra con los AJUSTE', consistencia.every(c => c.ok), JSON.stringify(consistencia.filter(c => !c.ok)));
+  r = await api('GET', '/conciliacion/consistencia');
+  check('Reporte de consistencia por API', r.status === 200 && typeof r.data.revisados === 'number' && Array.isArray(r.data.problemas), r.data?.error);
+  r = await api('GET', '/conciliacion/consistencia', undefined, tokens.op);
+  check('Operario no ve el reporte → 403', r.status === 403);
+
+  // Anular y listar
+  r = await api('POST', '/conteos', { alcance: 'TODO' }, tokens.op);
+  const otro = r.data.id;
+  r = await api('POST', `/conteos/${otro}/anular`);
+  check('Anular un conteo abierto', r.status === 200 && r.data.estado === 'ANULADO');
+  r = await api('GET', '/conteos', undefined, tokens.consulta);
+  check('Lista de conteos con resumen y sin líneas', r.status === 200 && r.data.some(c => c.id === conteo.id && c.resumen.con_diferencia === 2 && !c.lineas), r.data?.error);
 });

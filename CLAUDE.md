@@ -33,6 +33,8 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 - `estanterias/routes.js` y `lib/estanterias.js`: Mapa de Bodega (`GET /api/mapa`) y estanterías. Guardar una estantería genera sus huecos `Z1-A-2-04` como ubicaciones del catálogo (`Ubicacion.estanteriaId`). `npm run estanterias:iniciales` carga la distribución inicial (sin `--aplicar` solo muestra).
 - `codificacion/routes.js` y `lib/codificacion.js`: códigos `001-RCM-B` (`docs/CODIFICACION.md`). Una categoría con letra exige subcategoría y variante y valida el código; el consecutivo lo da `siguienteCodigo`. El árbol se administra en Configuración → Codificación.
 - `novedades/routes.js` y `lib/novedades.js` (Fase E): lista de novedades y trazabilidad. Registrar novedad, sustituir y devolver van en `solicitudes/routes.js` (`/solicitudes/:id/novedades|sustituir|devolver`). La devolución deja `DEVOLUCIÓN SBO` ("Devolución de N") que el verificador suma; `NOVEDAD` no tiene efecto.
+- `indicadores/routes.js` y `lib/indicadores.js` (Fase F): `GET /api/indicadores` y `/api/indicadores/:id?anio&mes`. Cada métrica es una función pura sobre los datos de `cargarDatos()`; se prueba en `tests/indicadores.test.js` sin base de datos.
+- `conciliacion/routes.js` y `lib/conciliacion.js` (Fase G): conteos `CNT-0001`, aprobación con `AJUSTE` en el historial ("Ajuste de ±N", el verificador lo suma) y `GET /api/conciliacion/consistencia`.
 - `lib/stock.js`: reservar, liberar, descontar y despachar, con `SELECT … FOR UPDATE`. Un producto agotado se conserva con 0 unidades.
 - `lib/errores.js`: errores con status y mensajes en español.
 - `scripts/verificar-consistencia.js`: lógica pura reutilizable para Conciliación.

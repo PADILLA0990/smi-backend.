@@ -63,6 +63,15 @@ function recalcular(historial, zonas = {}) {
         p.cantidad += n;
         break;
       }
+      case 'AJUSTE': {
+        // Fase G: diferencia aprobada de un conteo físico ("Ajuste de +3" / "Ajuste de -2")
+        const n = numero(d, /Ajuste de ([+-]?\d+)/i);
+        if (n === null) { p.avisos.push(`#${mov.id} AJUSTE sin cantidad legible`); break; }
+        p.cantidad += n;
+        if (p.cantidad < 0) p.avisos.push(`#${mov.id} el saldo queda negativo (${p.cantidad})`);
+        if (p.cantidad > 0) { p.existe = true; p.agotado = false; } else { p.existe = false; p.agotado = true; }
+        break;
+      }
       case 'SALIDA/RETIRO':
       case 'SALIDA SBO': {
         const n = numero(d, /(?:Retiro|Despacho) de (\d+)/i);
