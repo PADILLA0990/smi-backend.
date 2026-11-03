@@ -247,9 +247,13 @@ Sin cambios en la base de datos.
 - Demarcación: página imprimible `/demarcacion` (letreros de rack, etiquetas de nivel y de hueco con código de barras Code 128) y propuesta en `docs/DEMARCACION.md`.
 - Alineación: se midieron las 19 pantallas; ninguna fila desalineada.
 
+## 03/11/2026
+
+- Producción: Alistamiento 1 y 2 retirados como ubicación (`plano:completar --aplicar`) y todos los racks con 3 niveles (`estanterias:niveles -- 3 --aplicar`), tras el respaldo `respaldo-smi-20261103-antes-completar-y-3-niveles.dump`.
+- Las letras A–J de los racks quedan como asignación propia (decisión del usuario).
+
 ## Pendiente
 
-- Confirmar en la bodega las letras de los racks en el plano y el rack J (3 × 3); se corrige en Configuración → Estanterías y → Plano.
 - Confirmar en qué racks hay un hueco de más del nivel 2 hacia arriba (hoy en todos los de la Zona 1; los testers dijeron "en algunos"). Se cambia por rack en Configuración → Estanterías.
 - Validar la propuesta de demarcación (docs/DEMARCACION.md) e imprimir las etiquetas.
 - Carga del inventario real (cuando el usuario lo decida).

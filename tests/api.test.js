@@ -853,7 +853,7 @@ test('Mapa de Bodega: estanterías, huecos generados y contenido del mapa', asyn
   r = await api('GET', '/mapa');
   const z1 = r.data.zonas.find(z => z.zona === 'Z1');
   const j = r.data.zonas.find(z => z.zona === 'Z2')?.estanterias.find(e => e.rack === 'J');
-  check('Zona 1 con racks A–I y áreas; rack J con 3 niveles', z1 && 'ABCDEFGHI'.split('').every(x => z1.estanterias.some(e => e.rack === x)) && z1.areas.some(a => a.codigo === 'Cajas') && j?.niveles === 3, JSON.stringify(z1?.estanterias.map(e => e.codigo)));
+  check('Zona 1 con racks A–I y áreas; todos los racks con 3 niveles', z1 && 'ABCDEFGHI'.split('').every(x => z1.estanterias.some(e => e.rack === x && e.niveles === 3)) && z1.areas.some(a => a.codigo === 'Cajas') && j?.niveles === 3, JSON.stringify(z1?.estanterias.map(e => e.codigo)));
 });
 
 test('Codificación 001-RCM-B: árbol, código sugerido y validación al crear', async () => {
@@ -1126,7 +1126,7 @@ test('Plano de bodega: huecos por nivel, posición de los racks y elementos', as
   r = await api('GET', '/mapa');
   const z1 = r.data.zonas.find(z => z.zona === 'Z1');
   const a = z1.estanterias.find(e => e.rack === 'A');
-  check('Rack A: 4 huecos abajo y 5 en los niveles 2 a 4, con posición en el plano', a.huecos === 4 && a.huecos_superiores === 5 && a.celdas.length === 19 && a.plano !== null, JSON.stringify({ h: a.huecos, s: a.huecos_superiores, n: a.celdas.length }));
+  check('Rack A: 3 niveles, 4 huecos abajo y 5 en los niveles 2 y 3, con posición en el plano', a.niveles === 3 && a.huecos === 4 && a.huecos_superiores === 5 && a.celdas.length === 14 && a.plano !== null, JSON.stringify({ h: a.huecos, s: a.huecos_superiores, n: a.celdas.length }));
   check('La Zona 1 tiene plano con entradas, puertas y áreas', ['ENTRADA', 'PUERTA', 'AREA', 'CALLE'].every(t => z1.plano.some(p => p.tipo === t)));
   const mesas = z1.plano.filter(p => p.etiqueta.startsWith('Alistamiento'));
   check('Alistamiento: dibujado en el plano, sin ubicación y fuera de las áreas', mesas.length === 2 && mesas.every(p => !p.ubicacion) && !z1.areas.some(x => x.codigo.startsWith('Alistamiento')), JSON.stringify(mesas));

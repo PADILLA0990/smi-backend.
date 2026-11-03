@@ -1,5 +1,5 @@
 // Completa una bodega ya cargada con la distribución de lib/estanterias.js: huecos de los niveles superiores
-// (Zona 1: uno más del nivel 2 hacia arriba), posición de los racks en el plano y el plano de cada zona.
+// (Zona 1: uno más del nivel 2 hacia arriba; los niveles no se cambian, ver niveles-racks.js), posición de los racks en el plano y el plano de cada zona.
 // No cambia lo que ya esté configurado. Las zonas de alistamiento dejan de ser ubicaciones (si no tienen producto).
 // Uso: node scripts/completar-plano-bodega.js            (muestra qué haría, sin guardar)
 //      node scripts/completar-plano-bodega.js --aplicar  (guarda)
