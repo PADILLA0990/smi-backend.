@@ -260,11 +260,16 @@ Claves disponibles:
 
 | Método | Ruta | Permiso | Respuesta |
 |---|---|---|---|
-| GET | `/mapa` | `inventario:ver` | `{ zonas: [{ zona, nombre, estanterias: [{ id, codigo, rack, calle, niveles, huecos, celdas: [{ codigo, nivel, hueco, productos, unidades }] }], areas: [{ codigo, nombre, productos, unidades }] }], fuera_de_estanterias, resumen }`. Las celdas van del nivel más alto al 1. Solo cuenta productos con unidades. |
-| GET | `/estanterias` | `inventario:ver` | `[{ id, codigo, zona, rack, calle, niveles, huecos, orden, activo, ubicaciones, productos }]` |
-| POST | `/estanterias` | `configuracion:gestionar` | `{ zona: "Z1", rack: "A", niveles: 1–6, huecos: 1–30, calle?, orden? }` → 201 y genera los huecos. Repetida → 409. |
-| PATCH | `/estanterias/:id` | `configuracion:gestionar` | `{ calle?, niveles?, huecos?, orden?, activo? }`. Zona y rack no cambian (400). Quitar o desactivar huecos con producto → 409 con los códigos. |
-| POST | `/estanterias/distribucion-inicial` | `configuracion:gestionar` | Crea lo que falte de la distribución inicial → `{ estanterias: [...], areas: [...] }`. |
+| GET | `/mapa` | `inventario:ver` | `{ zonas: [{ zona, nombre, estanterias: [{ id, codigo, rack, calle, niveles, huecos, huecos_superiores, plano: { x, y, vertical } | null, celdas: [{ codigo, nivel, hueco, productos, unidades }] }], areas: [{ codigo, nombre, productos, unidades }], plano: [{ id, tipo, etiqueta, x, y, ancho, alto, ubicacion, unidades? }] }], fuera_de_estanterias, resumen }`. Las celdas van del nivel más alto al 1; del nivel 2 hacia arriba hay `huecos_superiores` por nivel si no es null. Solo cuenta productos con unidades. |
+| GET | `/estanterias` | `inventario:ver` | `[{ id, codigo, zona, rack, calle, niveles, huecos, huecos_superiores, orden, plano_x, plano_y, plano_vertical, activo, ubicaciones, productos }]` |
+| POST | `/estanterias` | `configuracion:gestionar` | `{ zona: "Z1", rack: "A", niveles: 1–6, huecos: 1–30, huecos_superiores?: 1–30 | null, calle?, orden?, plano_x?, plano_y?: 0–200 | null, plano_vertical? }` → 201 y genera los huecos. Repetida → 409. |
+| PATCH | `/estanterias/:id` | `configuracion:gestionar` | `{ calle?, niveles?, huecos?, huecos_superiores?, orden?, plano_x?, plano_y?, plano_vertical?, activo? }`. Zona y rack no cambian (400). Quitar o desactivar huecos con producto → 409 con los códigos. |
+| POST | `/estanterias/distribucion-inicial` | `configuracion:gestionar` | Crea lo que falte de la distribución inicial → `{ estanterias: [...], areas: [...], plano: { racks, elementos } }`. |
+| GET | `/plano` | `inventario:ver` | Elementos del plano: `[{ id, zona, tipo: AREA\|ENTRADA\|PUERTA\|CALLE\|PC\|PASO, etiqueta, x, y, ancho, alto, ubicacion, activo }]` (medidas en cuadros). |
+| POST | `/plano` | `configuracion:gestionar` | `{ zona, tipo, etiqueta, x, y, ancho, alto, ubicacion? }` → 201. `ubicacion` debe ser un área activa (no un hueco de rack). |
+| PATCH | `/plano/:id` | `configuracion:gestionar` | Cualquiera de los campos anteriores o `activo`. |
+| DELETE | `/plano/:id` | `configuracion:gestionar` | Quita el elemento (no toca la ubicación). |
+| POST | `/plano/completar` | `configuracion:gestionar` | Completa una bodega ya cargada con la distribución: huecos de los niveles superiores, posición de los racks y plano de las zonas que no lo tienen → `{ racks: [...], elementos: n }`. No cambia lo ya configurado. |
 
 Los productos de `/mapa` traen `ubicacion` (su `codigo_estanteria` o, si no tiene, su `ubicacion_general`).
 

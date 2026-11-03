@@ -12,6 +12,7 @@
     "dev:pruebas": "node --env-file=.env.pruebas index.js",
     "usuarios:iniciales": "node scripts/crear-usuarios-iniciales.js",
     "estanterias:iniciales": "node scripts/crear-estanterias-iniciales.js",
+    "plano:completar": "node scripts/completar-plano-bodega.js",
     "codificacion:inicial": "node scripts/crear-codificacion-inicial.js"
   },
   "keywords": [],

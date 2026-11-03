@@ -313,18 +313,24 @@ model Ubicacion {
 // Mapa de Bodega: rack abierto de N niveles (1 = abajo) por M huecos. Al guardarlo se generan sus
 // ubicaciones con código Z1-A-2-04 (zona-rack-nivel-hueco). Sin capacidad: el piso controla el espacio.
 model Estanteria {
-  id             Int         @id @default(autoincrement())
-  codigo         String      @unique // Z1-A
-  zona           String // Z1
-  rack           String // A
-  calle          String? // Nombre de la calle o pasillo (Koaj, Koller…)
-  niveles        Int
-  huecos         Int
-  orden          Int         @default(0)
-  activo         Boolean     @default(true)
-  creado_en      DateTime    @default(now())
-  actualizado_en DateTime    @updatedAt
-  ubicaciones    Ubicacion[]
+  id                Int         @id @default(autoincrement())
+  codigo            String      @unique // Z1-A
+  zona              String // Z1
+  rack              String // A
+  calle             String? // Nombre de la calle o pasillo (Koaj, Koller…)
+  niveles           Int
+  huecos            Int
+  // Huecos del nivel 2 hacia arriba cuando son distintos a los del nivel 1 (en la Zona 1 hay uno más arriba)
+  huecos_superiores Int?
+  orden             Int         @default(0)
+  // Plano de la bodega: posición en cuadros (esquina superior izquierda) y si el rack va vertical
+  plano_x           Float?
+  plano_y           Float?
+  plano_vertical    Boolean     @default(true)
+  activo            Boolean     @default(true)
+  creado_en         DateTime    @default(now())
+  actualizado_en    DateTime    @updatedAt
+  ubicaciones       Ubicacion[]
 }
 
 model Parametro {
@@ -470,4 +476,31 @@ model ConteoLinea {
 
   @@unique([conteoId, codigo_producto])
   @@index([conteoId])
+}
+
+// Plano de la bodega: lo que no es rack (áreas, entradas, puertas, calles, PC). Medidas en cuadros.
+enum TipoElementoPlano {
+  AREA
+  ENTRADA
+  PUERTA
+  CALLE
+  PC
+  PASO
+}
+
+model ElementoPlano {
+  id             Int               @id @default(autoincrement())
+  zona           String // Z1
+  tipo           TipoElementoPlano
+  etiqueta       String
+  x              Float
+  y              Float
+  ancho          Float
+  alto           Float
+  ubicacion      String? // Código de la ubicación (área) cuyo contenido se muestra al hacer clic
+  activo         Boolean           @default(true)
+  creado_en      DateTime          @default(now())
+  actualizado_en DateTime          @updatedAt
+
+  @@index([zona])
 }

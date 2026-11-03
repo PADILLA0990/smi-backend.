@@ -228,8 +228,14 @@ Sin cambios en la base de datos.
 - Prueba de punta a punta en navegador (fuera del repositorio, `HERRAMIENTAS CLAUDE/fase-h.mjs`): ingreso por documento → SBO → aprobar → alistamiento parcial con faltante automático → despacho → devolución → novedades, trazabilidad, inventario (stock 9 = 2 + 10 − 5 + 2) y consistencia sin problemas. También `fase-g.mjs` para Conciliación.
 - README del backend y del frontend.
 
+## Correcciones de los testers (02/11/2026, sin desplegar)
+
+- Formularios: las etiquetas de una fila quedaban a distinta altura cuando un campo traía texto de ayuda (Nueva solicitud, Documento de ingreso). Las filas se alinean por arriba. La fecha de la solicitud ya no se sale de la tarjeta.
+- Mapa de Bodega: plano de planta de cada zona según los bocetos (racks, áreas, entradas, puertas, calles y PC); clic en un rack lleva a su vista de frente y en un área muestra su contenido. Se edita en Configuración → Plano y la posición de cada rack en Estanterías.
+- Racks de la Zona 1: del nivel 2 hacia arriba tienen un hueco más que el nivel 1 (`huecos_superiores`). Migración `9_plano_bodega` (aditiva). En producción se aplica con `npm run plano:completar -- --aplicar` o con "Completar con la distribución" en Configuración → Estanterías.
+
 ## Pendiente (en orden)
 
 - Ronda de testers en producción y corrección de lo que reporten.
-- Desplegar E, F, G y H juntas: respaldo → migraciones 7 y 8 en producción (con autorización) → push del backend → `/version` → push del frontend.
+- Desplegar E, F, G, H y las correcciones juntas: respaldo → migraciones 7, 8 y 9 en producción (con autorización) → push del backend → `/version` → push del frontend.
 - Borrar los datos de los testers en producción (con respaldo y autorización) y cambiar las claves de la ronda.

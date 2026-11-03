@@ -59,6 +59,7 @@ async function limpiarDatosTest() {
   // Estantería de prueba del Mapa de Bodega: zona Z99 (el código de estantería no admite el prefijo TEST-)
   await prisma.ubicacion.deleteMany({ where: { OR: [{ estanteria: { zona: 'Z99' } }, { codigo: { startsWith: 'Z99-' } }] } });
   await prisma.estanteria.deleteMany({ where: { zona: 'Z99' } });
+  await prisma.elementoPlano.deleteMany({ where: { zona: 'Z99' } });
   await prisma.parametro.deleteMany(); // solo existe en el esquema de pruebas: vuelve a los valores por defecto
 }
 
@@ -1079,4 +1080,52 @@ test('Fase G: conteo físico, diferencias y ajustes aprobados', async () => {
   check('Anular un conteo abierto', r.status === 200 && r.data.estado === 'ANULADO');
   r = await api('GET', '/conteos', undefined, tokens.consulta);
   check('Lista de conteos con resumen y sin líneas', r.status === 200 && r.data.some(c => c.id === conteo.id && c.resumen.con_diferencia === 2 && !c.lineas), r.data?.error);
+});
+
+test('Plano de bodega: huecos por nivel, posición de los racks y elementos', async () => {
+  r = await api('POST', '/estanterias', { zona: 'Z99', rack: 'P', niveles: 3, huecos: 2, huecos_superiores: 3, plano_x: 5, plano_y: 6.5 });
+  check('Crea un rack con un hueco más del nivel 2 hacia arriba', r.status === 201 && r.data.huecos_superiores === 3, r.data?.error);
+  const rack = r.data;
+  const codigos = async () => (await api('GET', '/ubicaciones')).data.filter(u => u.codigo.startsWith('Z99-P-')).map(u => u.codigo).sort().join();
+  check('Huecos: 2 en el nivel 1 y 3 en los niveles 2 y 3', (await codigos()) === 'Z99-P-1-01,Z99-P-1-02,Z99-P-2-01,Z99-P-2-02,Z99-P-2-03,Z99-P-3-01,Z99-P-3-02,Z99-P-3-03', await codigos());
+  r = await api('GET', '/mapa');
+  let est = r.data.zonas.find(z => z.zona === 'Z99').estanterias.find(e => e.codigo === 'Z99-P');
+  check('El mapa trae 8 celdas y la posición en el plano', est.celdas.length === 8 && est.celdas.filter(c => c.nivel === 1).length === 2 && est.plano?.x === 5 && est.plano?.y === 6.5 && est.plano?.vertical === true, JSON.stringify(est.plano));
+  r = await api('PATCH', `/estanterias/${rack.id}`, { huecos_superiores: 99 });
+  check('Huecos superiores fuera de rango → 400', r.status === 400, r.data?.error);
+  r = await api('PATCH', `/estanterias/${rack.id}`, { huecos_superiores: null, plano_vertical: false });
+  check('Sin huecos superiores: todos los niveles con 2 (los sobrantes se desactivan)', r.status === 200 && (await codigos()) === 'Z99-P-1-01,Z99-P-1-02,Z99-P-2-01,Z99-P-2-02,Z99-P-3-01,Z99-P-3-02', await codigos());
+
+  // Elementos del plano
+  r = await api('POST', '/plano', { zona: 'Z99', tipo: 'AREA', etiqueta: 'TEST-Área', x: 1, y: 1, ancho: 4, alto: 3 }, tokens.op);
+  check('Operario no edita el plano → 403', r.status === 403);
+  r = await api('POST', '/plano', { zona: 'Z99', tipo: 'BODEGA', etiqueta: 'X', x: 1, y: 1, ancho: 4, alto: 3 });
+  check('Tipo inválido → 400', r.status === 400);
+  r = await api('POST', '/plano', { zona: 'Z99', tipo: 'AREA', etiqueta: 'TEST-Área', x: 1, y: 1, ancho: 4, alto: 3, ubicacion: 'Z99-P-1-01' });
+  check('Un área no se enlaza a un hueco de rack → 400', r.status === 400, r.data?.error);
+  r = await api('POST', '/plano', { zona: 'z99', tipo: 'AREA', etiqueta: 'TEST-Área', x: 1, y: 1, ancho: 4, alto: 3, ubicacion: 'alistamiento 1' });
+  check('Crea un área enlazada a su ubicación', r.status === 201 && r.data.zona === 'Z99' && r.data.ubicacion === 'Alistamiento 1', r.data?.error);
+  const area = r.data;
+  r = await api('PATCH', `/plano/${area.id}`, { etiqueta: 'TEST-Área 2', x: 2 });
+  check('Edita el elemento', r.status === 200 && r.data.etiqueta === 'TEST-Área 2' && r.data.x === 2);
+  r = await api('GET', '/mapa', undefined, tokens.consulta);
+  const el = r.data.zonas.find(z => z.zona === 'Z99').plano.find(p => p.id === area.id);
+  check('El mapa trae el elemento con las unidades del área', el && el.tipo === 'AREA' && typeof el.unidades === 'number', JSON.stringify(el));
+  r = await api('GET', '/plano', undefined, tokens.consulta);
+  check('Consulta ve el plano', r.status === 200 && r.data.some(p => p.id === area.id));
+  r = await api('DELETE', `/plano/${area.id}`);
+  check('Borra el elemento', r.status === 200 && (await api('DELETE', `/plano/${area.id}`)).status === 404);
+
+  // Completar una bodega ya cargada (la distribución de la Zona 1 lleva un hueco más arriba)
+  r = await api('POST', '/plano/completar', {}, tokens.op);
+  check('Operario no completa el plano → 403', r.status === 403);
+  r = await api('POST', '/plano/completar', {});
+  check('Completar responde los cambios', r.status === 200 && Array.isArray(r.data.racks), r.data?.error);
+  r = await api('GET', '/mapa');
+  const z1 = r.data.zonas.find(z => z.zona === 'Z1');
+  const a = z1.estanterias.find(e => e.rack === 'A');
+  check('Rack A: 4 huecos abajo y 5 en los niveles 2 a 4, con posición en el plano', a.huecos === 4 && a.huecos_superiores === 5 && a.celdas.length === 19 && a.plano !== null, JSON.stringify({ h: a.huecos, s: a.huecos_superiores, n: a.celdas.length }));
+  check('La Zona 1 tiene plano con entradas, puertas y áreas', ['ENTRADA', 'PUERTA', 'AREA', 'CALLE'].every(t => z1.plano.some(p => p.tipo === t)));
+  r = await api('POST', '/plano/completar', {});
+  check('Completar otra vez no cambia nada', r.status === 200 && r.data.racks.length === 0 && r.data.elementos === 0, JSON.stringify(r.data));
 });
