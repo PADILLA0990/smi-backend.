@@ -220,6 +220,16 @@ Sin cambios en la base de datos.
 - Conteo físico de todo el inventario, una categoría o una ubicación; diferencias en unidades y %; aprobación (Coordinador o Administrador) con motivo de tipo AJUSTE que deja `AJUSTE` en el historial. El verificador suma los ajustes.
 - Página **Conciliación**: nuevo conteo, registro de cantidades, aprobar o anular, exportar a CSV y reporte de consistencia historial ↔ stock.
 
+## Fase H: Calidad y entrega (02/11/2026, sin desplegar)
+
+- Índices de consulta en la migración `8_conciliacion_indices` (ver Fase G).
+- `tests/rutas-protegidas.test.js` (sin base de datos): toda ruta bajo `/api` pasa por `autenticar()` y declara `autorizar()` con un permiso que existe en `auth/permisos.js`. La única excepción es la transición de SBO, que revisa el permiso de cada acción.
+- La API.md cubre todas las rutas del código (revisado el 02/11/2026).
+- Prueba de punta a punta en navegador (fuera del repositorio, `HERRAMIENTAS CLAUDE/fase-h.mjs`): ingreso por documento → SBO → aprobar → alistamiento parcial con faltante automático → despacho → devolución → novedades, trazabilidad, inventario (stock 9 = 2 + 10 − 5 + 2) y consistencia sin problemas. También `fase-g.mjs` para Conciliación.
+- README del backend y del frontend.
+
 ## Pendiente (en orden)
 
-- **H** Calidad y entrega.
+- Ronda de testers en producción y corrección de lo que reporten.
+- Desplegar E, F, G y H juntas: respaldo → migraciones 7 y 8 en producción (con autorización) → push del backend → `/version` → push del frontend.
+- Borrar los datos de los testers en producción (con respaldo y autorización) y cambiar las claves de la ronda.

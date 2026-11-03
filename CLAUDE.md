@@ -8,7 +8,7 @@ Node + Express 5 (CommonJS) + Prisma 5 + PostgreSQL en Supabase. Despliegue auto
 ## Comandos
 - `npm run dev`: servidor con nodemon (puerto 3000). Requiere `JWT_SECRET` (ver `.env.example`).
 - `npm run dev:pruebas`: servidor en el puerto 3001 contra el esquema `smi_pruebas` (`.env.pruebas`).
-- `npm test`: pruebas de integración (autenticación, permisos y las 33 originales) y pruebas unitarias. Corre en `smi_pruebas`, levanta su propio servidor en el puerto 3999 y usa solo datos y usuarios `TEST-`, que limpia antes y después.
+- `npm test`: pruebas de integración (autenticación, permisos y las 33 originales) y pruebas unitarias (indicadores, consistencia y `rutas-protegidas.test.js`, que exige `autorizar()` en toda ruta nueva). Corre en `smi_pruebas`, levanta su propio servidor en el puerto 3999 y usa solo datos y usuarios `TEST-`, que limpia antes y después.
 - `npm run usuarios:iniciales`: crea admin, Operario01 y Operario02 con contraseñas temporales en `credenciales-iniciales.txt` (fuera de git). Nunca mostrar ese archivo en el chat.
 - `npm run verificar [-- --api <URL>]`: consistencia historial ↔ stock, solo lectura.
 
