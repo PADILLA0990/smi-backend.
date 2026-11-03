@@ -234,8 +234,14 @@ Sin cambios en la base de datos.
 - Mapa de Bodega: plano de planta de cada zona según los bocetos (racks, áreas, entradas, puertas, calles y PC); clic en un rack lleva a su vista de frente y en un área muestra su contenido. Se edita en Configuración → Plano y la posición de cada rack en Estanterías.
 - Racks de la Zona 1: del nivel 2 hacia arriba tienen un hueco más que el nivel 1 (`huecos_superiores`). Migración `9_plano_bodega` (aditiva). En producción se aplica con `npm run plano:completar -- --aplicar` o con "Completar con la distribución" en Configuración → Estanterías.
 
-## Pendiente (en orden)
+## Despliegue final (02/11/2026)
 
-- Ronda de testers en producción y corrección de lo que reporten.
-- Desplegar E, F, G, H y las correcciones juntas: respaldo → migraciones 7, 8 y 9 en producción (con autorización) → push del backend → `/version` → push del frontend.
-- Borrar los datos de los testers en producción (con respaldo y autorización) y cambiar las claves de la ronda.
+- Respaldo `respaldos/respaldo-smi-20261102-antes-fases-e-h-y-limpieza.dump`; migraciones 7, 8 y 9 aplicadas en producción; backend `b3d0554` y frontend `6237731` publicados.
+- `npm run plano:completar -- --aplicar`: los racks A–I de la Zona 1 quedaron con un hueco más del nivel 2 hacia arriba (27 huecos nuevos), todos los racks con posición en el plano y 27 elementos del plano.
+- Ronda de testers cerrada: producción no tenía datos de operación (0 productos, movimientos, SBO, documentos, novedades y conteos), así que no hubo nada que borrar. Se conservan la codificación, las estanterías y el plano.
+- Las claves de admin, Operario01 y Operario02 se cambiaron por temporales nuevas (se cambian al primer ingreso) y se cerraron sus sesiones.
+
+## Pendiente
+
+- Confirmar en la bodega las letras de los racks en el plano y el rack J (3 × 3); se corrige en Configuración → Estanterías y → Plano.
+- Carga del inventario real (cuando el usuario lo decida).
