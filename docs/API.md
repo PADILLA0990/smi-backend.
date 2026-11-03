@@ -269,7 +269,7 @@ Claves disponibles:
 | POST | `/plano` | `configuracion:gestionar` | `{ zona, tipo, etiqueta, x, y, ancho, alto, ubicacion? }` → 201. `ubicacion` debe ser un área activa (no un hueco de rack). |
 | PATCH | `/plano/:id` | `configuracion:gestionar` | Cualquiera de los campos anteriores o `activo`. |
 | DELETE | `/plano/:id` | `configuracion:gestionar` | Quita el elemento (no toca la ubicación). |
-| POST | `/plano/completar` | `configuracion:gestionar` | Completa una bodega ya cargada con la distribución: huecos de los niveles superiores, posición de los racks y plano de las zonas que no lo tienen → `{ racks: [...], elementos: n }`. No cambia lo ya configurado. |
+| POST | `/plano/completar` | `configuracion:gestionar` | Completa una bodega ya cargada con la distribución: huecos de los niveles superiores, posición de los racks y plano de las zonas que no lo tienen; las mesas de alistamiento dejan de ser ubicaciones si no tienen producto → `{ racks: [...], elementos: n, areas_retiradas: [...], areas_con_producto: [...] }`. No cambia lo demás ya configurado. |
 
 Los productos de `/mapa` traen `ubicacion` (su `codigo_estanteria` o, si no tiene, su `ubicacion_general`).
 

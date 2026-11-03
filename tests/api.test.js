@@ -853,7 +853,7 @@ test('Mapa de Bodega: estanterías, huecos generados y contenido del mapa', asyn
   r = await api('GET', '/mapa');
   const z1 = r.data.zonas.find(z => z.zona === 'Z1');
   const j = r.data.zonas.find(z => z.zona === 'Z2')?.estanterias.find(e => e.rack === 'J');
-  check('Zona 1 con racks A–I y áreas; rack J con 3 niveles', z1 && 'ABCDEFGHI'.split('').every(x => z1.estanterias.some(e => e.rack === x)) && z1.areas.some(a => a.codigo === 'Alistamiento 1') && j?.niveles === 3, JSON.stringify(z1?.estanterias.map(e => e.codigo)));
+  check('Zona 1 con racks A–I y áreas; rack J con 3 niveles', z1 && 'ABCDEFGHI'.split('').every(x => z1.estanterias.some(e => e.rack === x)) && z1.areas.some(a => a.codigo === 'Cajas') && j?.niveles === 3, JSON.stringify(z1?.estanterias.map(e => e.codigo)));
 });
 
 test('Codificación 001-RCM-B: árbol, código sugerido y validación al crear', async () => {
@@ -1103,9 +1103,11 @@ test('Plano de bodega: huecos por nivel, posición de los racks y elementos', as
   check('Tipo inválido → 400', r.status === 400);
   r = await api('POST', '/plano', { zona: 'Z99', tipo: 'AREA', etiqueta: 'TEST-Área', x: 1, y: 1, ancho: 4, alto: 3, ubicacion: 'Z99-P-1-01' });
   check('Un área no se enlaza a un hueco de rack → 400', r.status === 400, r.data?.error);
-  r = await api('POST', '/plano', { zona: 'z99', tipo: 'AREA', etiqueta: 'TEST-Área', x: 1, y: 1, ancho: 4, alto: 3, ubicacion: 'alistamiento 1' });
-  check('Crea un área enlazada a su ubicación', r.status === 201 && r.data.zona === 'Z99' && r.data.ubicacion === 'Alistamiento 1', r.data?.error);
+  r = await api('POST', '/plano', { zona: 'z99', tipo: 'AREA', etiqueta: 'TEST-Área', x: 1, y: 1, ancho: 4, alto: 3, ubicacion: 'cajas' });
+  check('Crea un área enlazada a su ubicación', r.status === 201 && r.data.zona === 'Z99' && r.data.ubicacion === 'Cajas', r.data?.error);
   const area = r.data;
+  r = await api('POST', '/plano', { zona: 'Z99', tipo: 'AREA', etiqueta: 'TEST-Mesa', x: 1, y: 1, ancho: 4, alto: 3, ubicacion: 'Alistamiento 1' });
+  check('Alistamiento no es ubicación: no se enlaza → 400', r.status === 400, r.data?.error);
   r = await api('PATCH', `/plano/${area.id}`, { etiqueta: 'TEST-Área 2', x: 2 });
   check('Edita el elemento', r.status === 200 && r.data.etiqueta === 'TEST-Área 2' && r.data.x === 2);
   r = await api('GET', '/mapa', undefined, tokens.consulta);
@@ -1126,6 +1128,10 @@ test('Plano de bodega: huecos por nivel, posición de los racks y elementos', as
   const a = z1.estanterias.find(e => e.rack === 'A');
   check('Rack A: 4 huecos abajo y 5 en los niveles 2 a 4, con posición en el plano', a.huecos === 4 && a.huecos_superiores === 5 && a.celdas.length === 19 && a.plano !== null, JSON.stringify({ h: a.huecos, s: a.huecos_superiores, n: a.celdas.length }));
   check('La Zona 1 tiene plano con entradas, puertas y áreas', ['ENTRADA', 'PUERTA', 'AREA', 'CALLE'].every(t => z1.plano.some(p => p.tipo === t)));
+  const mesas = z1.plano.filter(p => p.etiqueta.startsWith('Alistamiento'));
+  check('Alistamiento: dibujado en el plano, sin ubicación y fuera de las áreas', mesas.length === 2 && mesas.every(p => !p.ubicacion) && !z1.areas.some(x => x.codigo.startsWith('Alistamiento')), JSON.stringify(mesas));
+  r = await api('GET', '/ubicaciones');
+  check('Alistamiento no aparece en las ubicaciones activas', !r.data.some(u => u.codigo.startsWith('Alistamiento')));
   r = await api('POST', '/plano/completar', {});
-  check('Completar otra vez no cambia nada', r.status === 200 && r.data.racks.length === 0 && r.data.elementos === 0, JSON.stringify(r.data));
+  check('Completar otra vez no cambia nada', r.status === 200 && r.data.racks.length === 0 && r.data.elementos === 0 && r.data.areas_retiradas.length === 0, JSON.stringify(r.data));
 });

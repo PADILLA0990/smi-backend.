@@ -241,7 +241,15 @@ Sin cambios en la base de datos.
 - Ronda de testers cerrada: producción no tenía datos de operación (0 productos, movimientos, SBO, documentos, novedades y conteos), así que no hubo nada que borrar. Se conservan la codificación, las estanterías y el plano.
 - Las claves de admin, Operario01 y Operario02 se cambiaron por temporales nuevas (se cambian al primer ingreso) y se cerraron sus sesiones.
 
+## Segunda ronda de correcciones (02/11/2026, noche)
+
+- Alistamiento 1 y 2 ya no son ubicaciones: se ven en el plano como "área de trabajo (no se almacena)" y no aparecen al ingresar ni reubicar. En producción se aplica con `npm run plano:completar -- --aplicar`.
+- Demarcación: página imprimible `/demarcacion` (letreros de rack, etiquetas de nivel y de hueco con código de barras Code 128) y propuesta en `docs/DEMARCACION.md`.
+- Alineación: se midieron las 19 pantallas; ninguna fila desalineada.
+
 ## Pendiente
 
 - Confirmar en la bodega las letras de los racks en el plano y el rack J (3 × 3); se corrige en Configuración → Estanterías y → Plano.
+- Confirmar en qué racks hay un hueco de más del nivel 2 hacia arriba (hoy en todos los de la Zona 1; los testers dijeron "en algunos"). Se cambia por rack en Configuración → Estanterías.
+- Validar la propuesta de demarcación (docs/DEMARCACION.md) e imprimir las etiquetas.
 - Carga del inventario real (cuando el usuario lo decida).
