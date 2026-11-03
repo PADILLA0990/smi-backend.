@@ -251,6 +251,7 @@ Sin cambios en la base de datos.
 
 - Producción: Alistamiento 1 y 2 retirados como ubicación (`plano:completar --aplicar`) y todos los racks con 3 niveles (`estanterias:niveles -- 3 --aplicar`), tras el respaldo `respaldo-smi-20261103-antes-completar-y-3-niveles.dump`.
 - Las letras A–J de los racks quedan como asignación propia (decisión del usuario).
+- Luego, por decisión del usuario, todos los racks (también el J) quedaron con 4 niveles (`estanterias:niveles -- 4 --aplicar`, respaldo `respaldo-smi-20261103-antes-4-niveles.dump`).
 
 ## Pendiente
 
