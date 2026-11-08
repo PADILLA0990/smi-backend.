@@ -136,7 +136,7 @@ Cada registro trae `sbo` (la SBO relacionada o `null`) y `es_sbo` (si el registr
 
 Estados: CREADA → APROBADA → EN_ALISTAMIENTO → ALISTADA → DESPACHADA. Desde cualquiera de los cuatro primeros se puede pasar a CANCELADA (usuario) o a **VENCIDA** (sistema).
 
-- **Código:** sin `codigo_sbo`, el sistema asigna el siguiente consecutivo `SBO-0001`, `SBO-0002`… Los códigos escritos a mano con otro formato no cuentan para el consecutivo. Un código repetido da 409.
+- **Código:** sin `codigo_sbo`, el sistema asigna el siguiente consecutivo `SBO-0001`, `SBO-0002`… Los códigos escritos a mano con otro formato no cuentan para el consecutivo. Un código escrito a mano se guarda en mayúsculas, así que un código repetido da 409 aunque cambien las mayúsculas.
 - **Lista paginada:** `GET /solicitudes?pagina=1&porPagina=20` devuelve `{ datos, total, pagina, porPagina, resumen: { atrasadas, por_vencer } }`.
   - Filtros:
     - `estado`: un estado, o `ACTIVAS` para las cuatro sin despachar;

@@ -679,6 +679,8 @@ test('Fase D3: código automático y referencia por línea', async () => {
   check('El siguiente código avanza', Number(r.data.codigo.slice(4)) === Number(sugerido.slice(4)) + 1, r.data.codigo);
   r = await api('POST', '/solicitudes', { codigo_sbo: sugerido, beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-S-001', cantidad_solicitada: 1 }] }, tokens.op);
   check('Código repetido escrito a mano → 409', r.status === 409, r.data?.error);
+  r = await api('POST', '/solicitudes', { codigo_sbo: sugerido.toLowerCase(), beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-S-001', cantidad_solicitada: 1 }] }, tokens.op);
+  check('El mismo código en minúsculas también es repetido → 409', r.status === 409, `${r.status} ${r.data?.error}`);
   r = await api('GET', `/solicitudes/codigo/${sugerido}`, undefined, tokens.consulta);
   check('Detalle por código', r.status === 200 && r.data.id === auto.id && r.data.eventos.length === 1);
   r = await api('GET', '/solicitudes/codigo/NO-EXISTE', undefined, tokens.consulta);

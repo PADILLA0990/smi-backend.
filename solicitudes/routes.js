@@ -153,8 +153,9 @@ router.post('/', autorizar('sbo:crear'), async (req, res) => {
   try {
     const { fecha_requerida, observaciones, items } = req.body;
     const creado_por = req.usuario.usuario;
-    // Sin código, el sistema asigna el siguiente SBO-0001; uno escrito a mano debe ser único
-    const codigoEnviado = typeof req.body.codigo_sbo === 'string' ? req.body.codigo_sbo.trim() : '';
+    // Sin código, el sistema asigna el siguiente SBO-0001; uno escrito a mano debe ser único.
+    // Se guarda en mayúsculas para que el índice único no admita sbo-1 y SBO-1 a la vez
+    const codigoEnviado = typeof req.body.codigo_sbo === 'string' ? req.body.codigo_sbo.trim().toUpperCase() : '';
     if (codigoEnviado.length > 40) {
       return res.status(400).json({ error: 'El código SBO admite máximo 40 caracteres.' });
     }
