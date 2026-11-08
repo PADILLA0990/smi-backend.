@@ -253,13 +253,13 @@ Sin cambios en la base de datos.
 - Las letras A–J de los racks quedan como asignación propia (decisión del usuario).
 - Luego, por decisión del usuario, todos los racks (también el J) quedaron con 4 niveles (`estanterias:niveles -- 4 --aplicar`, respaldo `respaldo-smi-20261103-antes-4-niveles.dump`).
 
-## Revisión general (07/11/2026, sin commit ni despliegue)
+## Revisión general (07/11/2026, desplegada el 08/11/2026)
 
 La carpeta de OneDrive de este computador tenía una copia del 31/10; se actualizó a GitHub (`2499398` / `ebf3b9a`). Los commits locales de la revisión hecha sobre la copia vieja quedaron en la rama `respaldo/revision-07-11` de cada repositorio. El proyecto se movió a `PROYECTOS - PROGRAMACIÓN/SMI BAB/`.
 
 Recorrido con clics en navegador contra `smi_pruebas` (usuarios y datos `REV-`, ya borrados): configuración, ingreso con producto nuevo a un hueco, salida, inventario y reubicación, mapa, SBO completa (alistamiento parcial con nota, novedad, despacho y devolución), novedades, trazabilidad, indicadores, conciliación con ajuste, historial, usuarios, roles Operario y Consulta, y vista en celular. Todo funcionó.
 
-**Correcciones pendientes de commit**
+**Correcciones** (publicadas el 08/11/2026: backend `d18c795`, frontend `485401d`; sin migraciones ni cambios en la base; confirmadas con `/version`)
 - Frontend: la lista de sugerencias de productos (SelectBuscable) quedaba recortada dentro de la tabla de líneas de los documentos; ahora usa posición fija y se abre hacia arriba si no cabe.
 - Frontend: al registrar un ingreso o una salida la ventana de confirmación quedaba abierta y vacía un instante, con el botón activo.
 - Frontend: `.tabla-scroll` con `position: relative`; la página de Ingresos y Retiros ya no se desplaza hacia los lados.
@@ -271,7 +271,6 @@ Recorrido con clics en navegador contra `smi_pruebas` (usuarios y datos `REV-`, 
 
 ## Pendiente
 
-- Hacer commit y desplegar las correcciones de la revisión del 07/11/2026 (cuando el usuario lo indique).
 - Confirmar en qué racks hay un hueco de más del nivel 2 hacia arriba (hoy en todos los de la Zona 1; los testers dijeron "en algunos"). Se cambia por rack en Configuración → Estanterías.
 - Validar la propuesta de demarcación (docs/DEMARCACION.md) e imprimir las etiquetas.
 - Carga del inventario real (cuando el usuario lo decida).
