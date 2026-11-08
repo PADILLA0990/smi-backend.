@@ -683,6 +683,10 @@ test('Fase D3: código automático y referencia por línea', async () => {
   check('Detalle por código', r.status === 200 && r.data.id === auto.id && r.data.eventos.length === 1);
   r = await api('GET', '/solicitudes/codigo/NO-EXISTE', undefined, tokens.consulta);
   check('Código inexistente → 404', r.status === 404);
+  r = await api('POST', '/solicitudes', { beneficiario: 'TEST-Org', fecha_requerida: 'mañana', items: [{ codigo_producto: 'TEST-S-001', cantidad_solicitada: 1 }] }, tokens.op);
+  check('Fecha requerida no válida → 400 (no error interno)', r.status === 400, `${r.status} ${r.data?.error}`);
+  r = await api('POST', '/solicitudes', { beneficiario: 'TEST-Org', observaciones: { x: 1 }, items: [{ codigo_producto: 'TEST-S-001', cantidad_solicitada: 1 }] }, tokens.op);
+  check('Observaciones que no son texto → 400', r.status === 400, `${r.status} ${r.data?.error}`);
 });
 
 test('Fase D3: lista paginada con filtros, atrasada y tiempos', async () => {

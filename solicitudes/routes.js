@@ -158,6 +158,18 @@ router.post('/', autorizar('sbo:crear'), async (req, res) => {
     if (codigoEnviado.length > 40) {
       return res.status(400).json({ error: 'El código SBO admite máximo 40 caracteres.' });
     }
+    // Fecha requerida (AAAA-MM-DD) y observaciones: se validan aquí para responder 400 y no un error interno
+    let fechaRequerida = null;
+    if (fecha_requerida !== undefined && fecha_requerida !== null && fecha_requerida !== '') {
+      fechaRequerida = typeof fecha_requerida === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fecha_requerida)
+        ? new Date(fecha_requerida) : null;
+      if (!fechaRequerida || Number.isNaN(fechaRequerida.getTime())) {
+        return res.status(400).json({ error: 'La fecha requerida debe tener el formato AAAA-MM-DD.' });
+      }
+    }
+    if (observaciones !== undefined && observaciones !== null && (typeof observaciones !== 'string' || observaciones.trim().length > 500)) {
+      return res.status(400).json({ error: 'Las observaciones deben ser texto de máximo 500 caracteres.' });
+    }
     // El beneficiario es una organización del catálogo (por id o por nombre)
     const beneficiarioEnviado = req.body.organizacionId ?? req.body.beneficiario;
     if (beneficiarioEnviado === undefined || beneficiarioEnviado === null || String(beneficiarioEnviado).trim() === '') {
@@ -175,8 +187,8 @@ router.post('/', autorizar('sbo:crear'), async (req, res) => {
           beneficiario,
           organizacionId: organizacion.id,
           creado_por,
-          observaciones,
-          fecha_requerida: fecha_requerida ? new Date(fecha_requerida) : null,
+          observaciones: typeof observaciones === 'string' ? observaciones.trim() || null : null,
+          fecha_requerida: fechaRequerida,
           items: { create: itemsPreparados },
           eventos: { create: { estado_nuevo: 'CREADA', usuario: creado_por } }
         },
