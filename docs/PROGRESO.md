@@ -269,8 +269,12 @@ Recorrido con clics en navegador contra `smi_pruebas` (usuarios y datos `REV-`, 
 
 **Sin corregir (cosmético):** al cerrar sesión, el título de la pestaña conserva el de la última página.
 
+## 08/11/2026
+
+- Decisiones del usuario: los racks y la demarcación se quedan como están actualmente. El inventario real no se está contando por ahora.
+- Recorrido con clics en navegador contra `smi_pruebas` (usuario `REV-admin`; productos `REV-ROP-001`, `REV-APP-001` y `REV-CAL-001`, documentos `ING-0001` y `SAL-0001`; se conservan): ingreso, salida, reubicación, inventario, historial, mapa y consistencia correctos.
+- Corrección: el Dashboard mostraba 0 ubicaciones con producto porque solo miraba `codigo_estanteria`, y un producto nuevo guarda su hueco en `ubicacion_general` (con prueba; backend 55 de 55; desplegada el 08/11/2026, sin cambios en la base).
+
 ## Pendiente
 
-- Confirmar en qué racks hay un hueco de más del nivel 2 hacia arriba (hoy en todos los de la Zona 1; los testers dijeron "en algunos"). Se cambia por rack en Configuración → Estanterías.
-- Validar la propuesta de demarcación (docs/DEMARCACION.md) e imprimir las etiquetas.
 - Carga del inventario real (cuando el usuario lo decida).

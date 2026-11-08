@@ -817,6 +817,7 @@ test('Mapa de Bodega: estanterías, huecos generados y contenido del mapa', asyn
   check('La celda muestra el producto y sus unidades', celda.productos.length === 1 && celda.productos[0].codigo_producto === 'TEST-M-1' && celda.unidades === 4);
   check('Ya no está fuera de estanterías', !r.data.fuera_de_estanterias.some(p => p.codigo_producto === 'TEST-M-1') && r.data.resumen.huecos_ocupados >= 1);
 
+  const ocupadasAntes = (await api('GET', '/dashboard')).data.bodega.ubicaciones_ocupadas;
   r = await api('POST', '/productos', { codigo_producto: 'TEST-M-2', descripcion: 'Mesa ingresada al hueco', categoria: 'Textiles', cantidad: 2, condicion: 'BUENO', ubicacion_general: 'Z99-T-1-02' });
   check('Ingreso directo a un hueco', r.status === 201 && r.data.producto.ubicacion_general === 'Z99-T-1-02', r.data?.error);
   r = await api('GET', '/productos?pagina=1&sinUbicar=1&q=TEST-M-');
@@ -825,6 +826,7 @@ test('Mapa de Bodega: estanterías, huecos generados y contenido del mapa', asyn
   check('El mapa lo muestra en su hueco', r.data.zonas.find(z => z.zona === 'Z99').estanterias[0].celdas.find(c => c.codigo === 'Z99-T-1-02').productos.some(p => p.codigo_producto === 'TEST-M-2'));
   r = await api('GET', '/dashboard');
   check('El Dashboard tampoco lo cuenta sin ubicar', !r.data.productos_alerta.some(p => p.codigo_producto === 'TEST-M-2' && p.sin_ubicar));
+  check('El Dashboard cuenta como ocupado el hueco de un ingreso directo', r.data.bodega.ubicaciones_ocupadas === ocupadasAntes + 1, `${ocupadasAntes} → ${r.data.bodega.ubicaciones_ocupadas}`);
 
   r = await api('PATCH', `/estanterias/${rack.id}`, { huecos: 2 });
   check('No deja quitar un hueco con producto → 409', r.status === 409 && r.data.error.includes('Z99-T-2-03') && r.data.error.includes('TEST-M-1'), r.data?.error);
