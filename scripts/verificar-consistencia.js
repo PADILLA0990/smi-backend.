@@ -11,6 +11,8 @@
 //   node scripts/verificar-consistencia.js --json          (salida en JSON)
 // Sale con código 1 si encuentra diferencias.
 
+const { ACCION_CONFIGURACION } = require('../lib/historial');
+
 const ESTADOS_CON_RESERVA = ['APROBADA', 'EN_ALISTAMIENTO', 'ALISTADA'];
 // Acciones que no mueven stock ni ubicación (NOVEDAD: Fase E, informativa; HUECO: casilla "Lleno" del Mapa)
 const SIN_EFECTO = ['EDICIÓN', 'INACTIVACIÓN', 'ACTIVACIÓN', 'NOVEDAD', 'HUECO LLENO', 'HUECO DISPONIBLE'];
@@ -28,6 +30,7 @@ function recalcular(historial, zonas = {}) {
   const ordenado = [...historial].sort((a, b) => new Date(a.fecha) - new Date(b.fecha) || a.id - b.id);
 
   for (const mov of ordenado) {
+    if (mov.accion === ACCION_CONFIGURACION) continue; // No es un producto: su "código" es el área de Configuración
     const codigo = mov.codigo_producto;
     const p = esperado[codigo] || (esperado[codigo] = {
       existe: false, agotado: false, cantidad: 0, ubicacion_general: null, codigo_estanteria: null, movimientos: [], avisos: []

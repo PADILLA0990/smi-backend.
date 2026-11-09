@@ -9,6 +9,7 @@ const {
 } = require('../lib/catalogos');
 // Un producto está en la ubicación de su estantería o, si no tiene, en su ubicación general (p. ej. Recepción)
 const { enUbicacion } = require('../lib/inventario');
+const { registrarConfiguracion, describirCambios, registrarEdicion } = require('../lib/historial');
 
 const router = express.Router();
 const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
@@ -19,6 +20,11 @@ const definicion = (req, res) => {
   if (!def) res.status(404).json({ error: 'Catálogo no encontrado.' });
   return def;
 };
+
+// Cómo aparece cada cambio de catálogo en el historial
+const areaDe = (def) => def.etiqueta[0].toUpperCase() + def.etiqueta.slice(1);
+const nombreDe = (registro) => `"${registro.codigo ?? registro.nombre}"`;
+const etiquetasDe = (def) => Object.fromEntries(Object.entries(def.campos).map(([campo, d]) => [campo, d.etiqueta]));
 
 // Listas fijas que el frontend necesita para sus selectores
 router.get('/catalogos/opciones', autorizar('inventario:ver'), (req, res) => {
@@ -76,7 +82,9 @@ router.post('/catalogos/:catalogo', autorizar('configuracion:gestionar'), async 
     const data = validarCampos(def, req.body || {});
     const registro = await prisma.$transaction(async (tx) => {
       await verificarUnicos(tx, def, data);
-      return tx[def.modelo].create({ data });
+      const creado = await tx[def.modelo].create({ data });
+      await registrarConfiguracion(tx, areaDe(def), req.usuario, `Creó ${nombreDe(creado)}`);
+      return creado;
     }, OPCIONES_TX);
     res.status(201).json(registro);
   } catch (error) {
@@ -118,6 +126,7 @@ router.patch('/catalogos/:catalogo/:id', autorizar('configuracion:gestionar'), a
       if (req.params.catalogo === 'categorias' && data.nombre && data.nombre !== actual.nombre) {
         await tx.producto.updateMany({ where: { categoriaId: id }, data: { categoria: data.nombre } });
       }
+      await registrarEdicion(tx, areaDe(def), req.usuario, nombreDe(actual), actual, actualizado, etiquetasDe(def));
       return actualizado;
     }, OPCIONES_TX);
     res.json(registro);
@@ -139,11 +148,16 @@ router.get('/parametros', autorizar('inventario:ver'), async (req, res) => {
 router.put('/parametros', autorizar('configuracion:gestionar'), async (req, res) => {
   try {
     const cambios = await prisma.$transaction(async (tx) => {
-      const nuevos = validarParametros(req.body || {}, await leerParametros(tx));
+      const antes = await leerParametros(tx);
+      const nuevos = validarParametros(req.body || {}, antes);
       for (const [clave, valor] of Object.entries(nuevos)) {
         await tx.parametro.upsert({ where: { clave }, create: { clave, valor: String(valor) }, update: { valor: String(valor) } });
       }
-      return leerParametros(tx);
+      const despues = await leerParametros(tx);
+      const etiquetas = Object.fromEntries(Object.entries(PARAMETROS).map(([clave, d]) => [clave, d.etiqueta]));
+      const cambios = describirCambios(antes, despues, etiquetas);
+      if (cambios) await registrarConfiguracion(tx, 'Parámetros', req.usuario, cambios);
+      return despues;
     }, OPCIONES_TX);
     res.json(cambios);
   } catch (error) {

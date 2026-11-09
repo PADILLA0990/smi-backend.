@@ -282,6 +282,11 @@ Recorrido con clics en navegador contra `smi_pruebas` (usuarios y datos `REV-`, 
 - Recorrido con clics en producción, solo datos DEMO: ciclo completo de SBO, sustitución, novedad, devolución, cancelación, conteo, trazabilidad y remisión correctos; consistencia sin diferencias en 64 productos; datos reales intactos. Quedan como registros de prueba `SBO-0021`, `SBO-0022` y `CNT-0004` (anulado). La simultaneidad no se probó en producción porque cada pestaña exige su propio inicio de sesión.
 - El borrado de datos DEMO ya solo elimina conteos DEMO que quedan vacíos; se conservan los que tienen líneas reales y los vacíos que no son DEMO (probado en `smi_pruebas`).
 
+## 09/11/2026
+
+- Recorrido con clics en producción por rol (`admin`, `Coordinador02`, `Operario01`), solo datos DEMO: permisos correctos y cada movimiento con su responsable en Historial.
+- Los cambios de Configuración (catálogos, parámetros, estanterías, plano y codificación) ahora quedan en Historial con la acción `CONFIGURACIÓN` y su responsable; antes no dejaban registro.
+
 ## Pendiente
 
 - Carga del inventario real y de los catálogos reales (cuando el usuario lo decida).

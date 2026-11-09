@@ -132,6 +132,8 @@ Solo el Administrador, y solo si el producto no tiene movimientos aparte de su i
 
 Cada registro trae `sbo` (la SBO relacionada o `null`) y `es_sbo` (si el registro es un evento de SBO y no de un producto). Desde la Fase D2 también trae `documento` (`{ id, numero }` o `null`); el kardex lo incluye en cada movimiento.
 
+Los cambios de Configuración (catálogos, parámetros, estanterías, plano y codificación) quedan con la acción `CONFIGURACIÓN`, en la misma transacción que el cambio y con el usuario autenticado. En `codigo_producto` va el área ("Organización", "Parámetros"…) y en `detalles`, qué cambió ("Editó "X": Contacto: vacío → Ana"). Guardar sin cambios reales no deja registro. No son movimientos de inventario: el verificador de consistencia, los últimos movimientos del Dashboard y el indicador de movimientos por operario los ignoran.
+
 ## Solicitudes SBO (Fase D3)
 
 Estados: CREADA → APROBADA → EN_ALISTAMIENTO → ALISTADA → DESPACHADA. Desde cualquiera de los cuatro primeros se puede pasar a CANCELADA (usuario) o a **VENCIDA** (sistema).

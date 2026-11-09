@@ -49,6 +49,7 @@ async function limpiarDatosTest() {
   await prisma.historial.deleteMany({ where: { codigo_producto: { in: solicitudesTest.map(s => s.codigo_sbo) } } });
   await prisma.solicitud.deleteMany({ where: { codigo_sbo: { in: solicitudesTest.map(s => s.codigo_sbo) } } });
   await prisma.historial.deleteMany({ where: { codigo_producto: { startsWith: 'TEST-' } } });
+  await prisma.historial.deleteMany({ where: { accion: 'CONFIGURACIÓN', operario: { startsWith: 'TEST-' } } });
   await prisma.producto.deleteMany({ where: { codigo_producto: { startsWith: 'TEST-' } } });
   await prisma.usuario.deleteMany({ where: { usuario: { startsWith: 'TEST-' } } });
   // Catálogos de prueba (los productos ya se borraron, así que nada los referencia)
@@ -501,6 +502,75 @@ test('Fase C: parámetros de operación', async () => {
   check('Coordinador guarda parámetros', r.status === 200 && r.data.stock_minimo_defecto === 8 && r.data.dias_atraso_sbo === 2);
 });
 
+test('Configuración: cada cambio queda en el historial con su responsable', async () => {
+  // Registros de configuración hechos por usuarios de prueba, del más reciente al más antiguo
+  const configuracion = async () => (await api('GET', '/historial')).data
+    .filter(x => x.accion === 'CONFIGURACIÓN' && x.operario.startsWith('TEST-'))
+    .sort((a, b) => b.id - a.id);
+  const previos = (await configuracion()).length;
+
+  r = await api('POST', '/catalogos/organizaciones', { nombre: 'TEST-Org-Audit' }, tokens.admin);
+  check('Se crea la organización', r.status === 201, r.data?.error);
+  const idOrg = r.data.id;
+  h = await configuracion();
+  check('Crear deja registro con el usuario autenticado', h[0].codigo_producto === 'Organización' && h[0].operario === 'TEST-admin' && h[0].usuarioId !== null && h[0].detalles === 'Creó "TEST-Org-Audit"', JSON.stringify(h[0]));
+
+  r = await api('POST', '/catalogos/organizaciones', { nombre: 'test-org-audit' }, tokens.coord);
+  check('Un duplicado se rechaza y no deja registro', r.status === 409 && (await configuracion()).length === previos + 1);
+  r = await api('POST', '/catalogos/organizaciones', { nombre: 'TEST-Org-Nope' }, tokens.op);
+  check('Sin permiso no deja registro', r.status === 403 && (await configuracion()).length === previos + 1);
+
+  await api('PATCH', `/catalogos/organizaciones/${idOrg}`, { contacto: 'Ana' });
+  h = await configuracion();
+  check('Editar muestra antes y después con el responsable', h[0].operario === 'TEST-coord' && h[0].detalles === 'Editó "TEST-Org-Audit": Contacto: vacío → Ana', h[0].detalles);
+  const trasEditar = h.length;
+  await api('PATCH', `/catalogos/organizaciones/${idOrg}`, { contacto: 'Ana' });
+  check('Guardar sin cambios no deja registro', (await configuracion()).length === trasEditar);
+  await api('PATCH', `/catalogos/organizaciones/${idOrg}`, { activo: false });
+  h = await configuracion();
+  check('Desactivar queda registrado', h[0].detalles === 'Desactivó "TEST-Org-Audit"', h[0].detalles);
+  await api('PATCH', `/catalogos/organizaciones/${idOrg}`, { activo: true });
+  h = await configuracion();
+  check('Activar queda registrado', h[0].detalles === 'Activó "TEST-Org-Audit"', h[0].detalles);
+
+  await api('PUT', '/parametros', { dias_atraso_sbo: 3 });
+  h = await configuracion();
+  check('Cambiar un parámetro muestra solo lo que cambió', h[0].codigo_producto === 'Parámetros' && h[0].detalles === 'Días de tolerancia antes de marcar una SBO como atrasada: 2 → 3', h[0].detalles);
+  const trasParametro = h.length;
+  await api('PUT', '/parametros', { dias_atraso_sbo: 3 });
+  check('Guardar el mismo parámetro no deja registro', (await configuracion()).length === trasParametro);
+  await api('PUT', '/parametros', { dias_atraso_sbo: 2 });
+
+  r = await api('POST', '/estanterias', { zona: 'Z99', rack: 'H', niveles: 1, huecos: 2 });
+  check('Se crea la estantería', r.status === 201, r.data?.error);
+  const idEstanteria = r.data.id;
+  h = await configuracion();
+  check('Crear estantería queda registrado', h[0].codigo_producto === 'Estantería' && h[0].detalles === 'Creó Z99-H: 1 nivel(es), 2 hueco(s)', h[0].detalles);
+  await api('PATCH', `/estanterias/${idEstanteria}`, { calle: 'TEST-Calle-H' });
+  h = await configuracion();
+  check('Editar estantería queda registrado', h[0].detalles === 'Editó Z99-H: Calle: vacío → TEST-Calle-H', h[0].detalles);
+
+  r = await api('POST', '/plano', { zona: 'Z99', tipo: 'PC', etiqueta: 'TEST-PC', x: 1, y: 1, ancho: 1, alto: 1 });
+  check('Se crea el elemento del plano', r.status === 201, r.data?.error);
+  const idElemento = r.data.id;
+  h = await configuracion();
+  check('Crear elemento del plano queda registrado', h[0].codigo_producto === 'Plano' && h[0].detalles === 'Creó "TEST-PC" en Z99', h[0].detalles);
+  r = await api('DELETE', `/plano/${idElemento}`);
+  h = await configuracion();
+  check('Borrar elemento del plano queda registrado', r.status === 200 && h[0].detalles === 'Borró "TEST-PC" de Z99', h[0].detalles);
+  r = await api('DELETE', `/plano/${idElemento}`);
+  check('Borrar uno que no existe sigue dando 404', r.status === 404);
+
+  r = await api('GET', '/conciliacion/consistencia');
+  check('Los cambios de configuración no alteran la consistencia', !r.data.problemas.some(x => ['Organización', 'Parámetros', 'Estantería', 'Plano'].includes(x.codigo_producto)), JSON.stringify(r.data.problemas).slice(0, 300));
+  r = await api('GET', '/dashboard');
+  check('El Dashboard no los cuenta como movimientos', r.status === 200 && !r.data.ultimos_movimientos.some(x => x.accion === 'CONFIGURACIÓN'), r.data?.error);
+
+  // Las pruebas del Mapa de Bodega esperan la zona Z99 vacía
+  await prisma.ubicacion.deleteMany({ where: { estanteriaId: idEstanteria } });
+  await prisma.estanteria.delete({ where: { id: idEstanteria } });
+});
+
 // ======================= Fase D1: inventario e historial =======================
 
 test('Fase D1: inventario paginado con filtros y orden', async () => {
@@ -899,6 +969,8 @@ test('Codificación 001-RCM-B: árbol, código sugerido y validación al crear',
   check('Operario no edita la codificación → 403', r.status === 403);
   r = await api('PATCH', `/codificacion/categorias/${cat.id}`, { letra: 'q', nombre_variante: 'Público' });
   check('Letra de categoría en mayúscula', r.status === 200 && r.data.letra === 'Q', r.data?.error);
+  h = (await api('GET', '/historial')).data.filter(x => x.accion === 'CONFIGURACIÓN' && x.codigo_producto === 'Codificación').sort((a, b) => b.id - a.id);
+  check('La codificación queda en el historial con su responsable', h[0]?.operario === 'TEST-coord' && h[0].detalles.includes('Letra: vacío → Q'), h[0]?.detalles);
   r = await api('PATCH', `/codificacion/categorias/${cat.id}`, { letra: 'QQ' });
   check('Letra de dos caracteres → 400', r.status === 400);
   const sub = (await api('POST', `/codificacion/categorias/${cat.id}/subcategorias`, { letra: 'c', nombre: 'Camisas' })).data;
