@@ -734,6 +734,8 @@ test('Fase D3: aviso, renovación y vencimiento por falta de movimiento', async 
   check('Operario no renueva → 403', r.status === 403);
   r = await api('GET', '/solicitudes?pagina=1&porVencer=1');
   check('Filtro de por vencer', r.data.datos.some(s => s.id === avi) && r.data.datos.every(s => s.por_vencer));
+  r = await api('GET', '/solicitudes?pagina=1&porPagina=100&porVencer=1');
+  check('El resumen cuenta solo lo que deja el filtro', r.data.resumen.por_vencer === r.data.total && r.data.resumen.atrasadas === r.data.datos.filter(s => s.atrasada).length, JSON.stringify(r.data.resumen));
   r = await transicion(avi, 'renovar');
   check('Renovar: mismo estado, conteo reiniciado y evento', r.status === 200 && r.data.estado === 'CREADA' && r.data.por_vencer === false && r.data.dias_para_vencer === 30 && r.data.eventos.length === 2, JSON.stringify({ s: r.status, e: r.data?.error, d: r.data?.dias_para_vencer }));
 
