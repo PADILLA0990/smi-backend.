@@ -1119,6 +1119,44 @@ test('Fase G: conteo físico, diferencias y ajustes aprobados', async () => {
   check('Lista de conteos con resumen y sin líneas', r.status === 200 && r.data.some(c => c.id === conteo.id && c.resumen.con_diferencia === 2 && !c.lineas), r.data?.error);
 });
 
+test('Concurrencia: sustituciones simultáneas y numeración automática', async () => {
+  const cat = (await api('GET', '/catalogos/categorias')).data.find(c => c.nombre === 'TEST-Cat');
+  const crear = async (codigo_producto) => {
+    r = await api('POST', '/documentos/ingreso', { origen: 'DONACION', lineas: [{ codigo_producto, cantidad: 50, nuevo: { descripcion: 'Concurrencia', categoriaId: cat.id, ubicacion_general: 'TEST-RACK' } }] }, tokens.op);
+    check(`Ingreso de ${codigo_producto}`, r.status === 201, r.data?.error);
+  };
+  const aprobada = async (codigo_sbo, codigo_producto, cantidad_solicitada) => {
+    r = await api('POST', '/solicitudes', { codigo_sbo, beneficiario: 'TEST-Org', items: [{ codigo_producto, cantidad_solicitada }] }, tokens.op);
+    check(`SBO ${codigo_sbo}`, r.status === 201, r.data?.error);
+    const creada = r.data;
+    r = await transicion(creada.id, 'aprobar');
+    check(`Aprobar ${codigo_sbo}`, r.status === 200, r.data?.error);
+    return creada;
+  };
+  const reservado = async (codigo) => (await prisma.producto.findUnique({ where: { codigo_producto: codigo } })).cantidad_reservada;
+
+  for (const c of ['TEST-CONC-A', 'TEST-CONC-B', 'TEST-CONC-C']) await crear(c);
+  await aprobada('TEST-CONC-1', 'TEST-CONC-A', 7);
+  const s = await aprobada('TEST-CONC-2', 'TEST-CONC-A', 5);
+  const itemId = s.items[0].id;
+  const dobles = await Promise.all(['TEST-CONC-B', 'TEST-CONC-C'].map(codigo_sustituto => api('POST', `/solicitudes/${s.id}/sustituir`, { itemId, codigo_sustituto, descripcion: 'Sustitución simultánea' })));
+  check('Las sustituciones terminan sin error de servidor', dobles.every(x => x.status < 500), dobles.map(x => x.status).join());
+  const item = await prisma.solicitudItem.findUnique({ where: { id: itemId } });
+  const otro = item.codigo_producto === 'TEST-CONC-B' ? 'TEST-CONC-C' : 'TEST-CONC-B';
+  check('La otra SBO conserva su reserva', await reservado('TEST-CONC-A') === 7);
+  check('Solo el producto final de la línea queda reservado', await reservado(item.codigo_producto) === 5 && await reservado(otro) === 0);
+
+  await crear('TEST-CONC-N');
+  const rSbo = await Promise.all(Array.from({ length: 6 }, () => api('POST', '/solicitudes', { beneficiario: 'TEST-Org', items: [{ codigo_producto: 'TEST-CONC-N', cantidad_solicitada: 1 }] }, tokens.op)));
+  check('6 SBO con número automático a la vez', rSbo.every(x => x.status === 201) && new Set(rSbo.map(x => x.data.codigo_sbo)).size === 6, rSbo.map(x => `${x.status} ${x.data?.error || ''}`).join());
+  const conNovedades = await aprobada('TEST-CONC-3', 'TEST-CONC-N', 5);
+  const rNov = await Promise.all(Array.from({ length: 5 }, () => api('POST', `/solicitudes/${conNovedades.id}/novedades`, { tipo: 'OTRO', itemId: conNovedades.items[0].id, cantidad: 1, descripcion: 'Novedad simultánea' })));
+  check('5 novedades a la vez', rNov.every(x => x.status === 201), rNov.map(x => `${x.status} ${x.data?.error || ''}`).join());
+  const rCnt = await Promise.all(Array.from({ length: 3 }, () => api('POST', '/conteos', { alcance: 'CATEGORIA', categoriaId: cat.id, observaciones: 'Conteo simultáneo' }, tokens.op)));
+  check('3 conteos a la vez', rCnt.every(x => x.status === 201) && new Set(rCnt.map(x => x.data.codigo)).size === 3, rCnt.map(x => `${x.status} ${x.data?.error || ''}`).join());
+  for (const x of rCnt) await api('POST', `/conteos/${x.data.id}/anular`, {});
+});
+
 test('Plano de bodega: huecos por nivel, posición de los racks y elementos', async () => {
   r = await api('POST', '/estanterias', { zona: 'Z99', rack: 'P', niveles: 3, huecos: 2, huecos_superiores: 3, plano_x: 5, plano_y: 6.5 });
   check('Crea un rack con un hueco más del nivel 2 hacia arriba', r.status === 201 && r.data.huecos_superiores === 3, r.data?.error);

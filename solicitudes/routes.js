@@ -1,7 +1,7 @@
 const express = require('express');
 const { EstadoSolicitud } = require('@prisma/client');
 const prisma = require('../lib/prisma');
-const { StockError, reservarStock, liberarReserva, despacharReservado } = require('../lib/stock');
+const { StockError, LLAVES_CONSECUTIVO, bloquearConsecutivo, bloquearSolicitud, reservarStock, liberarReserva, despacharReservado } = require('../lib/stock');
 const { manejarError: manejarErrorGeneral, esEnteroPositivo } = require('../lib/errores');
 const { validarTransicion, accionesDisponibles } = require('./estados');
 const { registrarHistorial } = require('../lib/historial');
@@ -15,7 +15,7 @@ const { registrarNovedad, sustituirItem, devolverItem, registrarFaltantes } = re
 const router = express.Router();
 
 // Las transacciones van contra Supabase remoto: damos margen extra al tiempo límite
-const OPCIONES_TX = { maxWait: 10000, timeout: 20000 };
+const OPCIONES_TX = { maxWait: 10000, timeout: 60000 };
 
 const INCLUIR_DETALLE = { items: { orderBy: { id: 'asc' } }, eventos: { orderBy: { fecha: 'asc' } }, novedades: { orderBy: { fecha: 'asc' }, include: { motivo: { select: { nombre: true } } } } };
 
@@ -178,6 +178,7 @@ router.post('/', autorizar('sbo:crear'), async (req, res) => {
     }
 
     const crear = () => prisma.$transaction(async (tx) => {
+      if (!codigoEnviado) await bloquearConsecutivo(tx, LLAVES_CONSECUTIVO.SBO);
       const codigo_sbo = codigoEnviado || await siguienteCodigo(tx);
       const organizacion = await resolverActivo(tx, 'organizacion', beneficiarioEnviado, { etiqueta: 'La organización beneficiaria' });
       const beneficiario = organizacion.nombre;
@@ -200,7 +201,7 @@ router.post('/', autorizar('sbo:crear'), async (req, res) => {
       return nueva;
     }, OPCIONES_TX);
 
-    // Dos solicitudes creadas a la vez pueden calcular el mismo número: se reintenta con el siguiente
+    // Un número automático puede chocar con uno escrito a mano en ese instante: se reintenta con el siguiente
     let solicitud;
     for (let intento = 1; ; intento++) {
       try {
@@ -222,6 +223,7 @@ router.put('/:id/items', autorizar('sbo:crear'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const solicitud = await prisma.$transaction(async (tx) => {
+      await bloquearSolicitud(tx, id);
       const actual = await tx.solicitud.findUnique({ where: { id } });
       if (!actual) {
         throw new StockError(404, 'Solicitud no encontrada.');
@@ -258,6 +260,7 @@ router.post('/:id/transicion', async (req, res) => {
     }
 
     const solicitud = await prisma.$transaction(async (tx) => {
+      await bloquearSolicitud(tx, id);
       const actual = await tx.solicitud.findUnique({ where: { id }, include: { items: true } });
       if (!actual) {
         throw new StockError(404, 'Solicitud no encontrada.');
