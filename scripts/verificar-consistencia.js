@@ -12,8 +12,8 @@
 // Sale con código 1 si encuentra diferencias.
 
 const ESTADOS_CON_RESERVA = ['APROBADA', 'EN_ALISTAMIENTO', 'ALISTADA'];
-// Acciones que no mueven stock ni ubicación (NOVEDAD: Fase E, informativa)
-const SIN_EFECTO = ['EDICIÓN', 'INACTIVACIÓN', 'ACTIVACIÓN', 'NOVEDAD'];
+// Acciones que no mueven stock ni ubicación (NOVEDAD: Fase E, informativa; HUECO: casilla "Lleno" del Mapa)
+const SIN_EFECTO = ['EDICIÓN', 'INACTIVACIÓN', 'ACTIVACIÓN', 'NOVEDAD', 'HUECO LLENO', 'HUECO DISPONIBLE'];
 
 const numero = (texto, regex) => {
   const m = texto && texto.match(regex);

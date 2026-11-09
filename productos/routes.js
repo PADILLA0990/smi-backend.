@@ -7,7 +7,7 @@ const { autorizar } = require('../auth/middleware');
 const { CONDICIONES, resolverActivo } = require('../lib/catalogos');
 const { listarProductos, kardexProducto, ESTADOS_SBO_ACTIVOS } = require('../lib/inventario');
 const { esCodificado } = require('../lib/codificacion');
-const { validarAtributos, resolverCategoria, resolverUbicacion, crearProducto, sumarStock, retirarStock } = require('../lib/movimientos');
+const { validarAtributos, resolverCategoria, resolverUbicacion, exigirHuecoDisponible, crearProducto, sumarStock, retirarStock } = require('../lib/movimientos');
 
 const router = express.Router();
 
@@ -107,6 +107,7 @@ router.put('/productos/:id', autorizar('productos:reubicar'), async (req, res) =
       if (!(await tx.producto.findUnique({ where: { id } }))) throw new StockError(404, 'El producto no existe.');
       // Solo se puede mover a una ubicación activa del catálogo
       const ubicacion = await resolverUbicacion(tx, req.body.codigo_estanteria);
+      exigirHuecoDisponible(ubicacion);
       const actualizado = await tx.producto.update({
         where: { id },
         data: { ubicacion_general: ubicacion.zona || 'Almacenamiento', codigo_estanteria: ubicacion.codigo }

@@ -306,12 +306,14 @@ model Ubicacion {
   // Mapa de Bodega: hueco generado por una estantería (vacío en áreas como Recepción o Alistamiento)
   estanteriaId   Int?
   estanteria     Estanteria? @relation(fields: [estanteriaId], references: [id], onDelete: SetNull)
+  // Solo huecos de rack: lo marca planta y, mientras esté marcado, no recibe ingresos ni reubicaciones
+  lleno          Boolean     @default(false)
 
   @@index([estanteriaId])
 }
 
 // Mapa de Bodega: rack abierto de N niveles (1 = abajo) por M huecos. Al guardarlo se generan sus
-// ubicaciones con código Z1-A-2-04 (zona-rack-nivel-hueco). Sin capacidad: el piso controla el espacio.
+// ubicaciones con código Z1-A-2-04 (zona-rack-nivel-hueco). Sin capacidad numérica: planta decide cuándo un hueco está lleno.
 model Estanteria {
   id                Int         @id @default(autoincrement())
   codigo            String      @unique // Z1-A

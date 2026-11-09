@@ -57,6 +57,7 @@ async function limpiarDatosTest() {
   }
   await prisma.ubicacion.deleteMany({ where: { codigo: { startsWith: 'TEST-' } } });
   // Estantería de prueba del Mapa de Bodega: zona Z99 (el código de estantería no admite el prefijo TEST-)
+  await prisma.historial.deleteMany({ where: { codigo_producto: { startsWith: 'Z99-' } } });
   await prisma.ubicacion.deleteMany({ where: { OR: [{ estanteria: { zona: 'Z99' } }, { codigo: { startsWith: 'Z99-' } }] } });
   await prisma.estanteria.deleteMany({ where: { zona: 'Z99' } });
   await prisma.elementoPlano.deleteMany({ where: { zona: 'Z99' } });
@@ -829,6 +830,32 @@ test('Mapa de Bodega: estanterías, huecos generados y contenido del mapa', asyn
   r = await api('GET', '/dashboard');
   check('El Dashboard tampoco lo cuenta sin ubicar', !r.data.productos_alerta.some(p => p.codigo_producto === 'TEST-M-2' && p.sin_ubicar));
   check('El Dashboard cuenta como ocupado el hueco de un ingreso directo', r.data.bodega.ubicaciones_ocupadas === ocupadasAntes + 1, `${ocupadasAntes} → ${r.data.bodega.ubicaciones_ocupadas}`);
+
+  // Casilla "Lleno": la marca planta y bloquea ingresos y reubicaciones al hueco
+  r = await api('PATCH', '/mapa/huecos/Z99-T-1-03/lleno', { lleno: true }, tokens.consulta);
+  check('Consulta no marca huecos → 403', r.status === 403);
+  r = await api('PATCH', '/mapa/huecos/Z99-T-1-03/lleno', { lleno: 'si' }, tokens.op);
+  check('Lleno debe ser verdadero o falso → 400', r.status === 400, r.data?.error);
+  r = await api('PATCH', '/mapa/huecos/Recepción/lleno', { lleno: true }, tokens.op);
+  check('Un área no se marca como llena → 400', r.status === 400, r.data?.error);
+  r = await api('PATCH', '/mapa/huecos/z99-t-1-03/lleno', { lleno: true }, tokens.op);
+  check('El operario marca el hueco como lleno', r.status === 200 && r.data.lleno === true, JSON.stringify(r.data));
+  r = await api('GET', '/mapa');
+  check('El mapa muestra el hueco lleno', r.data.zonas.find(z => z.zona === 'Z99').estanterias[0].celdas.find(c => c.codigo === 'Z99-T-1-03').lleno === true);
+  r = await api('POST', '/productos', { codigo_producto: 'TEST-M-3', descripcion: 'No cabe', categoria: 'Textiles', cantidad: 1, condicion: 'BUENO', ubicacion_general: 'Z99-T-1-03' });
+  check('Producto nuevo a un hueco lleno → 409', r.status === 409 && r.data.error.includes('Z99-T-1-03'), r.data?.error);
+  r = await api('PUT', `/productos/${prod.id}`, { codigo_estanteria: 'Z99-T-1-03' }, tokens.op);
+  check('Reubicar a un hueco lleno → 409', r.status === 409 && r.data.error.includes('lleno'), r.data?.error);
+  await api('PATCH', '/mapa/huecos/Z99-T-1-02/lleno', { lleno: true }, tokens.op);
+  r = await api('POST', '/documentos/ingreso', { origen: 'DONACION', lineas: [{ codigo_producto: 'TEST-M-2', cantidad: 1 }] }, tokens.op);
+  check('Ingreso de un producto que está en un hueco lleno → 409', r.status === 409 && r.data.error.includes('Z99-T-1-02'), r.data?.error);
+  await api('PATCH', '/mapa/huecos/Z99-T-1-02/lleno', { lleno: false }, tokens.op);
+  r = await api('PATCH', '/mapa/huecos/Z99-T-1-03/lleno', { lleno: false }, tokens.op);
+  check('Se desmarca el hueco', r.status === 200 && r.data.lleno === false);
+  r = await api('POST', '/documentos/ingreso', { origen: 'DONACION', lineas: [{ codigo_producto: 'TEST-M-2', cantidad: 1 }] }, tokens.op);
+  check('Con el hueco desmarcado vuelve a recibir', r.status === 201, r.data?.error);
+  r = await api('GET', '/conciliacion/consistencia');
+  check('La casilla no genera avisos de consistencia', !r.data.problemas.some(p => p.codigo_producto.startsWith('Z99-T-')), JSON.stringify(r.data.problemas).slice(0, 300));
 
   r = await api('PATCH', `/estanterias/${rack.id}`, { huecos: 2 });
   check('No deja quitar un hueco con producto → 409', r.status === 409 && r.data.error.includes('Z99-T-2-03') && r.data.error.includes('TEST-M-1'), r.data?.error);

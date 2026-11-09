@@ -14,7 +14,8 @@
     "estanterias:iniciales": "node scripts/crear-estanterias-iniciales.js",
     "estanterias:niveles": "node scripts/niveles-racks.js",
     "plano:completar": "node scripts/completar-plano-bodega.js",
-    "codificacion:inicial": "node scripts/crear-codificacion-inicial.js"
+    "codificacion:inicial": "node scripts/crear-codificacion-inicial.js",
+    "demo": "node scripts/datos-demo.js"
   },
   "keywords": [],
   "author": "",

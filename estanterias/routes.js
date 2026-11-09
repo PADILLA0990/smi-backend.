@@ -3,7 +3,7 @@ const express = require('express');
 const prisma = require('../lib/prisma');
 const { manejarError } = require('../lib/errores');
 const { autorizar } = require('../auth/middleware');
-const { crearEstanteria, editarEstanteria, listarEstanterias, mapaBodega, crearDistribucionInicial, completarPlano, guardarElemento } = require('../lib/estanterias');
+const { crearEstanteria, editarEstanteria, listarEstanterias, mapaBodega, marcarHuecoLleno, crearDistribucionInicial, completarPlano, guardarElemento } = require('../lib/estanterias');
 
 const router = express.Router();
 const OPCIONES_TX = { maxWait: 10000, timeout: 30000 };
@@ -14,6 +14,15 @@ router.get('/mapa', autorizar('inventario:ver'), async (req, res) => {
     res.json(await mapaBodega(prisma));
   } catch (error) {
     manejarError(res, error, 'Error al consultar el mapa de bodega');
+  }
+});
+
+// Casilla "Lleno" de un hueco de rack: body { lleno: true | false }
+router.patch('/mapa/huecos/:codigo/lleno', autorizar('productos:reubicar'), async (req, res) => {
+  try {
+    res.json(await prisma.$transaction(tx => marcarHuecoLleno(tx, req.params.codigo, req.body?.lleno, req.usuario), OPCIONES_TX));
+  } catch (error) {
+    manejarError(res, error, 'Error al marcar el hueco');
   }
 });
 
