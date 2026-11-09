@@ -274,7 +274,18 @@ Recorrido con clics en navegador contra `smi_pruebas` (usuarios y datos `REV-`, 
 - Decisiones del usuario: los racks y la demarcación se quedan como están actualmente. El inventario real no se está contando por ahora.
 - Recorrido con clics en navegador contra `smi_pruebas` (usuario `REV-admin`; productos `REV-ROP-001`, `REV-APP-001` y `REV-CAL-001`, documentos `ING-0001` y `SAL-0001`; se conservan): ingreso, salida, reubicación, inventario, historial, mapa y consistencia correctos.
 - Corrección: el Dashboard mostraba 0 ubicaciones con producto porque solo miraba `codigo_estanteria`, y un producto nuevo guarda su hueco en `ubicacion_general` (con prueba; backend 55 de 55; desplegada el 08/11/2026, sin cambios en la base).
+- Casilla "Lleno" por hueco de rack: la capacidad en sistema sigue siendo ilimitada y en planta deciden cuándo un hueco está lleno; mientras lo esté, no recibe ingresos ni reubicaciones (migración `9a_hueco_lleno`, desplegada; backend `9648a17`, frontend `0e79b07`).
+- Datos ficticios en producción con marca DEMO (`npm run demo`), autorizados por el usuario y con respaldo previo (`respaldos/respaldo-smi-20261108-antes-hueco-lleno-demo.dump`).
+- Corrección: el resumen de Solicitudes (atrasadas y por vencer) ahora respeta los filtros (`020a670`).
+- Prueba de concurrencia en `smi_pruebas`. Fallaban dos sustituciones de la misma línea (la otra SBO perdía reserva) y los números automáticos de SBO, novedades y conteos simultáneos. Corregido con bloqueo de la SBO antes de leerla y turnos por consecutivo; los tiempos de espera agotados responden 503 con mensaje claro (`cc3aac0`, desplegada, sin cambios en la base). Backend 56 de 56.
+- Límite conocido: con 30 salidas exactamente al mismo tiempo entraron 16 y 14 recibieron 503. El stock quedó exacto.
+- Recorrido con clics en producción, solo datos DEMO: ciclo completo de SBO, sustitución, novedad, devolución, cancelación, conteo, trazabilidad y remisión correctos; consistencia sin diferencias en 64 productos; datos reales intactos. Quedan como registros de prueba `SBO-0021`, `SBO-0022` y `CNT-0004` (anulado). La simultaneidad no se probó en producción porque cada pestaña exige su propio inicio de sesión.
+- El borrado de datos DEMO ya solo elimina conteos DEMO que quedan vacíos; se conservan los que tienen líneas reales y los vacíos que no son DEMO (probado en `smi_pruebas`).
 
 ## Pendiente
 
-- Carga del inventario real (cuando el usuario lo decida).
+- Carga del inventario real y de los catálogos reales (cuando el usuario lo decida).
+- Borrar los datos DEMO cuando el usuario lo indique.
+- Crear el usuario Coordinador y restablecer `Operario02` (lo hace el Administrador).
+- Probar la restauración de un respaldo.
+- Dividir un mismo producto entre varias ubicaciones.

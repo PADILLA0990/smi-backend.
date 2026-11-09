@@ -413,8 +413,10 @@ async function borrar(tx) {
   await tx.historial.deleteMany({ where: { OR: [delDemo, { codigo_producto: { in: codigosSbo } }, { documentoId: { in: idsDocumentos } }, { operario: { startsWith: 'DEMO-' } }] } });
   await tx.solicitud.deleteMany({ where: { id: { in: idsSolicitudes } } });
   await tx.documento.deleteMany({ where: { id: { in: idsDocumentos } } });
+  // Solo se borra el conteo DEMO que queda vacío: uno con líneas reales, o que ya estaba vacío y no es DEMO, se conserva
+  const conteosConDemo = await tx.conteo.findMany({ where: { lineas: { some: delDemo } }, select: { id: true } });
   await tx.conteoLinea.deleteMany({ where: delDemo });
-  await tx.conteo.deleteMany({ where: { OR: [{ observaciones: { startsWith: 'DEMO' } }, { lineas: { none: {} } }] } });
+  await tx.conteo.deleteMany({ where: { lineas: { none: {} }, OR: [{ id: { in: conteosConDemo.map(c => c.id) } }, { observaciones: { startsWith: 'DEMO' } }] } });
   await tx.producto.deleteMany({ where: delDemo });
   const nombre = { nombre: { startsWith: NOMBRE_DEMO } };
   await tx.organizacion.deleteMany({ where: nombre });

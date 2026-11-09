@@ -1,6 +1,6 @@
 # API de SMI-ControlBAB
 
-Base: `/api`. Todas las respuestas son JSON. Los errores tienen la forma `{ "error": "mensaje en español", "codigo": "OPCIONAL" }`.
+Base: `/api`. Todas las respuestas son JSON. Los errores tienen la forma `{ "error": "mensaje en español", "codigo": "OPCIONAL" }`. Un 503 indica que la base estuvo ocupada y la operación se revirtió por completo: se puede repetir.
 
 En producción el frontend llama a `/api/*` en su propio dominio (Vercel) y Vercel lo reenvía a Render. Así la cookie de sesión es de primera parte.
 
